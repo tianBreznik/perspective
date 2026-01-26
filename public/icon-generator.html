@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Icon Generator</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        canvas { border: 1px solid #ccc; margin: 10px; display: block; }
+        button { padding: 10px 20px; font-size: 16px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>PWA Icon Generator</h1>
+    <p>Icons will be generated automatically. Click "Download Icons" to save them.</p>
+    <canvas id="icon192" width="192" height="192"></canvas>
+    <canvas id="icon512" width="512" height="512"></canvas>
+    <br>
+    <button onclick="downloadIcons()">Download Icons</button>
+    
+    <script>
+        function generateIcon(canvas, size) {
+            const ctx = canvas.getContext('2d');
+            
+            // White background
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, size, size);
+            
+            // Draw "P" for Perspective
+            ctx.fillStyle = '#000000';
+            ctx.font = `bold ${size * 0.6}px serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('P', size / 2, size / 2);
+        }
+        
+        function downloadIcons() {
+            // Generate 192x192 icon
+            const canvas192 = document.getElementById('icon192');
+            generateIcon(canvas192, 192);
+            canvas192.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'icon-192.png';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+            
+            // Generate 512x512 icon
+            setTimeout(() => {
+                const canvas512 = document.getElementById('icon512');
+                generateIcon(canvas512, 512);
+                canvas512.toBlob((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'icon-512.png';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                });
+            }, 500);
+        }
+        
+        // Auto-generate on load
+        window.onload = () => {
+            generateIcon(document.getElementById('icon192'), 192);
+            generateIcon(document.getElementById('icon512'), 512);
+        };
+    </script>
+</body>
+</html>

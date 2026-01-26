@@ -1,0 +1,58 @@
+{
+  "formatVersion": 1,
+  "passTypeIdentifier": "pass.com.perspective.studio",
+  "serialNumber": "perspective-001",
+  "teamIdentifier": "TEAM123456",
+  "organizationName": "Perspective Studio",
+  "description": "Perspective Studio Digital Business Card",
+  "logoText": "Perspective",
+  "foregroundColor": "rgb(0, 0, 0)",
+  "backgroundColor": "rgb(255, 255, 255)",
+  "labelColor": "rgb(100, 100, 100)",
+  "webServiceURL": "https://your-website-url.com",
+  "associatedStoreIdentifiers": [],
+  "appLaunchURL": "https://your-website-url.com",
+  "userInfo": {
+    "website": "https://your-website-url.com"
+  },
+  "generic": {
+    "primaryFields": [
+      {
+        "key": "name",
+        "label": "Perspective Studio",
+        "value": "Perspective Studio"
+      }
+    ],
+    "secondaryFields": [
+      {
+        "key": "tagline",
+        "label": "",
+        "value": "Building the web we want to live with, one system at a time"
+      }
+    ],
+    "auxiliaryFields": [
+      {
+        "key": "quote",
+        "label": "",
+        "value": "\"Did I lose my perspective?\""
+      }
+    ],
+    "backFields": [
+      {
+        "key": "website",
+        "label": "Website",
+        "value": "https://your-website-url.com"
+      },
+      {
+        "key": "description",
+        "label": "Description",
+        "value": "Building the web we want to live with, one system at a time"
+      },
+      {
+        "key": "quote",
+        "label": "Quote",
+        "value": "\"Did I lose my perspective?\" — Charlotte Emma Aitchison"
+      }
+    ]
+  }
+}
