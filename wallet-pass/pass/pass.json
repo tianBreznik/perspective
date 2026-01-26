@@ -9,11 +9,9 @@
   "foregroundColor": "rgb(0, 0, 0)",
   "backgroundColor": "rgb(255, 255, 255)",
   "labelColor": "rgb(100, 100, 100)",
-  "webServiceURL": "https://your-website-url.com",
-  "associatedStoreIdentifiers": [],
-  "appLaunchURL": "https://your-website-url.com",
+  "appLaunchURL": "https://tianbreznik.github.io/perspective",
   "userInfo": {
-    "website": "https://your-website-url.com"
+    "website": "https://tianbreznik.github.io/perspective"
   },
   "generic": {
     "primaryFields": [
@@ -41,7 +39,7 @@
       {
         "key": "website",
         "label": "Website",
-        "value": "https://your-website-url.com"
+        "value": "https://tianbreznik.github.io/perspective"
       },
       {
         "key": "description",

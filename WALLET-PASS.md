@@ -6,7 +6,7 @@ This guide will help you create an Apple Wallet pass (.pkpass file) that opens y
 
 1. **Set your website URL** (after deployment):
    ```bash
-   export WEBSITE_URL="https://your-deployed-url.com"
+   export WEBSITE_URL="https://tianbreznik.github.io/perspective"
    npm run generate-wallet-pass
    ```
 
@@ -33,7 +33,7 @@ First, deploy your website to a public URL (Vercel, Netlify, etc.). You'll need 
 ### Step 2: Generate Pass Structure
 
 ```bash
-WEBSITE_URL="https://your-url.com" npm run generate-wallet-pass
+WEBSITE_URL="https://tianbreznik.github.io/perspective" npm run generate-wallet-pass
 ```
 
 This creates:

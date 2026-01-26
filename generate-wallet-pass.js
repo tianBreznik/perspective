@@ -6,7 +6,7 @@ const path = require('path');
 const archiver = require('archiver');
 
 // Configuration - UPDATE THIS with your deployed URL
-const WEBSITE_URL = process.env.WEBSITE_URL || 'https://your-website-url.com';
+const WEBSITE_URL = process.env.WEBSITE_URL || 'https://tianbreznik.github.io/perspective';
 const PASS_TYPE = 'generic'; // 'generic', 'coupon', 'eventTicket', etc.
 
 // Create pass directory structure
