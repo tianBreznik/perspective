@@ -29,9 +29,8 @@ const renderer = new THREE.WebGLRenderer({
     antialias: true
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio); // Use full pixel ratio for maximum detail
+renderer.setPixelRatio(window.devicePixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-// Get maximum supported anisotropy for high-quality texture filtering
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
 // Business card dimensions
@@ -41,32 +40,275 @@ const cardDepth = 0.001;
 
 // Load all texture maps
 const textureLoader = new THREE.TextureLoader();
-const paperColorTexture = textureLoader.load(colorMap);
-const paperNormalTexture = textureLoader.load(normalMap);
-const paperRoughnessTexture = textureLoader.load(roughnessMap);
-const paperDisplacementTexture = textureLoader.load(displacementMap);
 
-// Configure all textures for maximum detail and quality
-// Higher repeat values = more tiles = smaller, more refined details
-const textureRepeat = 1.5; // Tile the texture 2x2 times - balances detail visibility with refinement
-[paperColorTexture, paperNormalTexture, paperRoughnessTexture, paperDisplacementTexture].forEach(texture => {
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(textureRepeat, textureRepeat); // Repeat texture for finer details
-    texture.flipY = false;
-    // Use high-quality filtering for sharper details
-    texture.minFilter = THREE.LinearMipmapLinearFilter; // Best quality for minification
-    texture.magFilter = THREE.LinearFilter; // Best quality for magnification
-    texture.generateMipmaps = true; // Enable mipmaps for better quality at different distances
-    texture.anisotropy = Math.min(16, maxAnisotropy); // Maximum anisotropic filtering supported by GPU
+function configureTexture(tex) {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(2.0, 2.0);
+    tex.flipY = false;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = true;
+    tex.anisotropy = Math.min(16, maxAnisotropy);
+}
+
+const paperColorTexture = textureLoader.load(colorMap, configureTexture);
+const paperNormalTexture = textureLoader.load(normalMap, configureTexture);
+const paperRoughnessTexture = textureLoader.load(roughnessMap, configureTexture);
+const paperDisplacementTexture = textureLoader.load(displacementMap, configureTexture);
+[paperColorTexture, paperNormalTexture, paperRoughnessTexture, paperDisplacementTexture].forEach(configureTexture);
+
+// --- Text mask texture generation (runs after renderer context is ready) ---
+const fontLoader = new FontLoader();
+const font = fontLoader.parse(inriaSerifFont);
+const baskervvilleFont = fontLoader.parse(baskervvilleRegular);
+
+const TEXTURE_SIZE = 4096;
+const textureAspect = cardWidth / cardHeight;
+
+function renderTextToTexture(textItems, opts = {}) {
+    const w = opts.width || Math.round(TEXTURE_SIZE);
+    const h = opts.height || Math.round(TEXTURE_SIZE / textureAspect);
+    const rt = new THREE.WebGLRenderTarget(w, h, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+    });
+
+    const orthoScene = new THREE.Scene();
+    orthoScene.background = new THREE.Color(1, 1, 1);
+    const orthoCamera = new THREE.OrthographicCamera(
+        -cardWidth / 2, cardWidth / 2,
+        cardHeight / 2, -cardHeight / 2,
+        0.1, 10
+    );
+    orthoCamera.position.z = 1;
+    orthoCamera.lookAt(0, 0, 0);
+
+    const textMat = new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        depthTest: true,
+        depthWrite: true,
+    });
+
+    for (const item of textItems) {
+        const geom = new TextGeometry(item.text, {
+            font: item.font,
+            size: item.size,
+            height: 0.002,
+            curveSegments: 32,
+            bevelEnabled: false,
+        });
+        geom.computeBoundingBox();
+        if (item.center) {
+            const cx = (geom.boundingBox.min.x + geom.boundingBox.max.x) / 2;
+            const cy = (geom.boundingBox.min.y + geom.boundingBox.max.y) / 2;
+            geom.translate(-cx, -cy, 0);
+        } else {
+            geom.translate(
+                item.x - geom.boundingBox.min.x,
+                item.y - geom.boundingBox.min.y,
+                0
+            );
+        }
+        const mesh = new THREE.Mesh(geom, textMat);
+        orthoScene.add(mesh);
+    }
+
+    // Use main renderer - textures must stay in same WebGL context
+    const prevRt = renderer.getRenderTarget();
+    const prevClear = renderer.getClearColor(new THREE.Color());
+    renderer.setRenderTarget(rt);
+    renderer.setClearColor(0xffffff, 1);
+    renderer.clear();
+    renderer.render(orthoScene, orthoCamera);
+    renderer.setRenderTarget(prevRt);
+    renderer.setClearColor(prevClear);
+
+    rt.texture.flipY = false;
+    rt.texture.wrapS = THREE.ClampToEdgeWrapping;
+    rt.texture.wrapT = THREE.ClampToEdgeWrapping;
+    return rt.texture;
+}
+
+function randomSaturatedColor() {
+    const h = Math.random() * 360;
+    const s = 0.85;
+    const l = 0.5;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; }
+    else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; }
+    else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; }
+    else { r = c; b = x; }
+    return new THREE.Color(r + m, g + m, b + m);
+}
+
+function buildLetterMeshes(text, textFont, size, colorFn) {
+    const letters = text.split('');
+    const group = new THREE.Group();
+    let xOffset = 0;
+    for (let i = 0; i < letters.length; i++) {
+        const geom = new TextGeometry(letters[i], {
+            font: textFont,
+            size,
+            height: 0.002,
+            curveSegments: 32,
+            bevelEnabled: false,
+        });
+        geom.computeBoundingBox();
+        const w2 = geom.boundingBox.max.x - geom.boundingBox.min.x;
+        const cy = (geom.boundingBox.min.y + geom.boundingBox.max.y) / 2;
+        geom.translate(xOffset - geom.boundingBox.min.x, -cy, 0);
+        xOffset += w2;
+
+        const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({
+            color: colorFn(i),
+            depthTest: true,
+            depthWrite: true,
+        }));
+        group.add(mesh);
+    }
+    group.position.x = -xOffset / 2;
+    return group;
+}
+
+function renderPerspectiveTextures(textFont, size) {
+    const w = Math.round(TEXTURE_SIZE);
+    const h = Math.round(TEXTURE_SIZE / textureAspect);
+    const orthoCamera = new THREE.OrthographicCamera(
+        -cardWidth / 2, cardWidth / 2,
+        cardHeight / 2, -cardHeight / 2,
+        0.1, 10
+    );
+    orthoCamera.position.z = 1;
+    orthoCamera.lookAt(0, 0, 0);
+
+    const maskGroup = buildLetterMeshes('Perspective', textFont, size, () => 0x000000);
+    const colors = 'Perspective'.split('').map(() => randomSaturatedColor());
+    const colorGroup = buildLetterMeshes('Perspective', textFont, size, i => colors[i]);
+
+    const rtMask = new THREE.WebGLRenderTarget(w, h, {
+        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
+    });
+    const rtColors = new THREE.WebGLRenderTarget(w, h, {
+        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
+    });
+
+    const prevRt = renderer.getRenderTarget();
+    const prevClear = renderer.getClearColor(new THREE.Color());
+
+    const sceneMask = new THREE.Scene();
+    sceneMask.background = new THREE.Color(1, 1, 1);
+    sceneMask.add(maskGroup);
+    renderer.setRenderTarget(rtMask);
+    renderer.setClearColor(1, 1, 1, 1);
+    renderer.clear();
+    renderer.render(sceneMask, orthoCamera);
+
+    const sceneColors = new THREE.Scene();
+    sceneColors.background = new THREE.Color(0, 0, 0);
+    sceneColors.add(colorGroup);
+    renderer.setRenderTarget(rtColors);
+    renderer.setClearColor(0, 0, 0, 1);
+    renderer.clear();
+    renderer.render(sceneColors, orthoCamera);
+
+    renderer.setRenderTarget(prevRt);
+    renderer.setClearColor(prevClear);
+
+    [rtMask.texture, rtColors.texture].forEach(tex => {
+        tex.flipY = false;
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+    });
+
+    return { mask: rtMask.texture, colors: rtColors.texture };
+}
+
+// Back: tagline, quote, attribution layout
+const quoteTextSize = 0.08;
+const quoteX = -cardWidth / 2 + 0.15;
+const quoteY = -cardHeight / 2 + 0.25;
+const taglineText = '... building the web we want to live with, one system at a time';
+const _quoteGeom = new TextGeometry('"Did I lose my perspective?"', {
+    font: baskervvilleFont, size: quoteTextSize, height: 0.001, curveSegments: 20, bevelEnabled: false
 });
+_quoteGeom.computeBoundingBox();
+const quoteHeight = _quoteGeom.boundingBox.max.y - _quoteGeom.boundingBox.min.y;
+_quoteGeom.dispose();
+const taglineY = quoteY + quoteHeight + 0.05;
+const attributionY = quoteY - quoteHeight - 0.02;
 
-// Create card geometry with high segment count for maximum detail
-// More segments = finer displacement detail and better texture mapping
-const cardGeometry = new THREE.BoxGeometry(cardWidth, cardHeight, cardDepth, 512, 512);
+const BACK_UV_FLIP_X = true;
+const hoverUniform = { value: 0 };
+const HOVER_LERP = 0.08;
 
-// Create material for sides (just paper texture)
+function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, letterColorsTexture = null) {
+    const mat = new THREE.MeshStandardMaterial({
+        ...baseProps,
+        map: paperColorTexture,
+        emissiveMap: paperColorTexture,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.65,
+        normalMap: paperNormalTexture,
+        normalScale: new THREE.Vector2(1.6, 1.6),
+        roughnessMap: paperRoughnessTexture,
+        displacementMap: paperDisplacementTexture,
+        displacementScale: 0.025,
+        roughness: 0.6,
+        metalness: 0,
+    });
+
+    mat.onBeforeCompile = (shader) => {
+        shader.uniforms.uTextMask = { value: textMaskTexture };
+        shader.uniforms.uHover = hoverUniform;
+        if (letterColorsTexture) shader.uniforms.uLetterColors = { value: letterColorsTexture };
+
+        // Pass raw face UV (0-1) for text mask - vMapUv is scaled by map repeat
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <uv_pars_vertex>',
+            '#include <uv_pars_vertex>\nvarying vec2 vEngravedUv;'
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <uv_vertex>',
+            '#include <uv_vertex>\nvEngravedUv = uv;'
+        );
+        const uniformDecl = letterColorsTexture
+            ? 'uniform sampler2D uTextMask;\nuniform sampler2D uLetterColors;\nuniform float uHover;\nvarying vec2 vEngravedUv;\n'
+            : 'uniform sampler2D uTextMask;\nuniform float uHover;\nvarying vec2 vEngravedUv;\n';
+        shader.fragmentShader = uniformDecl + shader.fragmentShader;
+
+        const uvSample = flipBackUV ? 'vec2(1.0 - vEngravedUv.x, vEngravedUv.y)' : 'vEngravedUv';
+        const hoverColor = letterColorsTexture
+            ? 'texture2D(uLetterColors, ' + uvSample + ').rgb'
+            : 'vec3(0.04, 0.08, 0.5)';
+        const inject = `
+            vec4 textSample = texture2D(uTextMask, ${uvSample});
+            float raw = 1.0 - textSample.r;
+            float inText = smoothstep(0.15, 0.75, raw);
+            float darken = inText * (1.0 - uHover * 0.5) * 1.0;
+            vec3 darkened = outgoingLight * (1.0 - darken);
+            vec3 hoverColor = ${hoverColor};
+            outgoingLight = mix(darkened, hoverColor, uHover * inText * 1.0);
+        `;
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <opaque_fragment>',
+            `${inject}\n\t#include <opaque_fragment>`
+        );
+    };
+
+    return mat;
+}
+
 const sideMaterial = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     map: paperColorTexture,
@@ -74,171 +316,83 @@ const sideMaterial = new THREE.MeshStandardMaterial({
     emissive: 0xffffff,
     emissiveIntensity: 0.65,
     normalMap: paperNormalTexture,
+    normalScale: new THREE.Vector2(1.6, 1.6),
     roughnessMap: paperRoughnessTexture,
     displacementMap: paperDisplacementTexture,
-    displacementScale: 0.01,
+    displacementScale: 0.025,
     roughness: 0.6,
-    metalness: 0.0,
-    receiveShadow: false,
-    castShadow: false,
+    metalness: 0,
 });
 
-// Create material for front face - will blend paper (smooth) + text (crisp)
-const frontMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    map: paperColorTexture, // Paper texture with mipmaps for smooth detail
-    emissiveMap: paperColorTexture,
-    emissive: 0xffffff,
-    emissiveIntensity: 0.65,
-    normalMap: paperNormalTexture,
-    roughnessMap: paperRoughnessTexture,
-    displacementMap: paperDisplacementTexture,
-    displacementScale: 0.01,
-    roughness: 0.6,
-    metalness: 0.0,
-    receiveShadow: false,
-    castShadow: false,
-});
+let card;
 
-// Create materials array for box geometry (right, left, top, bottom, front, back)
-const materials = [
-    sideMaterial, // right
-    sideMaterial, // left
-    sideMaterial, // top
-    sideMaterial, // bottom
-    frontMaterial, // front (with text)
-    sideMaterial,  // back
-];
+function createHoverPlane(width, height, x, y, z, rotationY = 0) {
+    const geom = new THREE.PlaneGeometry(width, height);
+    const mat = new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    });
+    const plane = new THREE.Mesh(geom, mat);
+    plane.position.set(x, y, z);
+    plane.rotation.y = rotationY;
+    plane.userData.isHoverPlane = true;
+    return plane;
+}
 
-// Create card mesh with multiple materials
-const card = new THREE.Mesh(cardGeometry, materials);
-scene.add(card);
+function initCard() {
+    const { mask: frontTextTexture, colors: frontLetterColorsTexture } = renderPerspectiveTextures(font, 0.35);
 
-// Create text using TextGeometry - vector-based, perfectly crisp at any resolution
-const fontLoader = new FontLoader();
+    const backTextTexture = renderTextToTexture([
+        { text: taglineText, font: baskervvilleFont, size: quoteTextSize * 0.75, x: quoteX, y: taglineY },
+        { text: '"Did I lose my perspective?"', font: baskervvilleFont, size: quoteTextSize, x: quoteX, y: quoteY },
+        { text: '— Charlotte Emma Aitchison', font: baskervvilleFont, size: quoteTextSize * 0.85, x: quoteX + 0.1, y: attributionY }
+    ]);
 
-// Parse the Inria Serif font (soft serif font) - font is already imported
-const font = fontLoader.parse(inriaSerifFont);
+    const frontMaterial = createEngravedMaterial({}, frontTextTexture, false, frontLetterColorsTexture);
+    const backMaterial = createEngravedMaterial({}, backTextTexture, BACK_UV_FLIP_X);
 
-// Create text geometry - size it to fit nicely on the card
-// Card is 4 wide x 2.5 tall, so text should fit with margins
-const textSize = 0.35; // Size to be visible on card
-const textGeometry = new TextGeometry('Perspective', {
-    font: font,
-    size: textSize,
-    height: 0.001, // Small depth but visible
-    curveSegments: 24, // High detail for smooth curves
-    bevelEnabled: false, // No bevel for crisp edges
-});
+    const cardGeometry = new THREE.BoxGeometry(cardWidth, cardHeight, cardDepth, 256, 256);
+    card = new THREE.Mesh(cardGeometry, [
+        sideMaterial, sideMaterial, sideMaterial, sideMaterial,
+        frontMaterial,
+        backMaterial,
+    ]);
+    scene.add(card);
 
-// Center the geometry at origin (0,0,0) so it can be positioned relative to card center
-textGeometry.computeBoundingBox();
-const textCenterX = (textGeometry.boundingBox.min.x + textGeometry.boundingBox.max.x) / 2;
-const textCenterY = (textGeometry.boundingBox.min.y + textGeometry.boundingBox.max.y) / 2;
-// Translate geometry so its center is at origin
-textGeometry.translate(-textCenterX, -textCenterY, 0);
+    // Hover hit planes - bounding rectangles for each text item
+    const pad = 0.03;
+    const frontZ = cardDepth / 2 + 0.001;
 
-// Create material for text - deep black, no emission
-const textMaterial = new THREE.MeshStandardMaterial({
-    color: 0x000000, // Deep black
-    emissive: 0x000000,
-    emissiveIntensity: 0, // No emission so text stays black
-    roughness: 0.3,
-    metalness: 0.0,
-});
+    const perspGeom = new TextGeometry('Perspective', { font, size: 0.35, height: 0.001, curveSegments: 8, bevelEnabled: false });
+    perspGeom.computeBoundingBox();
+    const pw = perspGeom.boundingBox.max.x - perspGeom.boundingBox.min.x + pad * 2;
+    const ph = perspGeom.boundingBox.max.y - perspGeom.boundingBox.min.y + pad * 2;
+    perspGeom.dispose();
 
-// Create text mesh
-const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+    const frontPlane = createHoverPlane(pw, ph, 0, 0, frontZ, 0);
+    card.add(frontPlane);
+}
 
-// Position text on front face of card
-// Card BoxGeometry is centered, so front face is at z = cardDepth/2 = 0.0005
-// Position text on the front face surface - make sure it's visible
-// Center it at (0, 0) for perfect centering on the front face
-textMesh.position.set(0, 0, cardDepth + 0.005);
+// Raycaster for hover
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let isHovering = false;
 
-// Add text to card so it rotates with it
-card.add(textMesh);
+function onPointerMove(event) {
+    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+}
 
-console.log('Text geometry created and added to card with Inria Serif font');
-console.log('Text size:', textSize);
-console.log('Text position:', textMesh.position);
-console.log('Text bounds:', textGeometry.boundingBox);
-console.log('Card dimensions:', cardWidth, 'x', cardHeight, 'x', cardDepth);
+function updateHover() {
+    if (!card) return;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(card, true);
+    isHovering = hits.some(hit => hit.object.userData.isHoverPlane);
+}
 
-// Create quote text on back face (bottom left corner)
-// Parse Baskervville Regular font
-const baskervvilleFont = fontLoader.parse(baskervvilleRegular);
-
-// Create quote text geometry - smaller size for bottom corner
-const quoteTextSize = 0.08;
-const quoteText = '"Did I lose my perspective?"';
-const quoteGeometry = new TextGeometry(quoteText, {
-    font: baskervvilleFont,
-    size: quoteTextSize,
-    height: 0.001,
-    curveSegments: 12,
-    bevelEnabled: false,
-});
-
-// Position quote at bottom left - don't center, keep it left-aligned
-quoteGeometry.computeBoundingBox();
-// Position from bottom-left corner (negative x and negative y)
-const quoteX = -cardWidth / 2 + 0.15; // Left edge + margin
-const quoteY = -cardHeight / 2 + 0.25; // Bottom edge + margin (moved up)
-// Translate so the bottom-left of the text aligns with our position
-quoteGeometry.translate(
-    quoteX - quoteGeometry.boundingBox.min.x,
-    quoteY - quoteGeometry.boundingBox.min.y,
-    0
-);
-
-// Create material for quote text
-const quoteMaterial = new THREE.MeshStandardMaterial({
-    color: 0x000000,
-    emissive: 0x000000,
-    emissiveIntensity: 0,
-    roughness: 0.3,
-    metalness: 0.0,
-});
-
-// Create quote mesh
-const quoteMesh = new THREE.Mesh(quoteGeometry, quoteMaterial);
-// Position on back face (opposite side from "Perspective" text)
-// Front face text is at z = cardDepth + 0.005, so back face should be at z = -(cardDepth + 0.005)
-quoteMesh.position.set(0, 0, -cardDepth - 0.005);
-// Rotate 180 degrees around Y axis so text is correctly oriented when viewing the back face
-quoteMesh.rotation.y = Math.PI;
-card.add(quoteMesh);
-
-// Create attribution text (author name)
-const attributionText = "— Charlotte Emma Aitchison";
-const attributionGeometry = new TextGeometry(attributionText, {
-    font: baskervvilleFont,
-    size: quoteTextSize * 0.85, // Slightly smaller
-    height: 0.001,
-    curveSegments: 12,
-    bevelEnabled: false,
-});
-
-// Position attribution below the quote
-attributionGeometry.computeBoundingBox();
-const attributionY = quoteY - (quoteGeometry.boundingBox.max.y - quoteGeometry.boundingBox.min.y) - 0.005; // Below quote with spacing
-attributionGeometry.translate(
-    quoteX - attributionGeometry.boundingBox.min.x + 0.1,
-    attributionY - attributionGeometry.boundingBox.min.y,
-    0
-);
-
-// Create attribution mesh
-const attributionMesh = new THREE.Mesh(attributionGeometry, quoteMaterial);
-// Position on back face, same z as quote
-attributionMesh.position.set(0, 0, -cardDepth - 0.005);
-// Rotate 180 degrees around Y axis so text is correctly oriented when viewing the back face
-attributionMesh.rotation.y = Math.PI;
-card.add(attributionMesh);
-
-// Ambient lighting only - provides even, flat illumination
-// This ensures the texture color is visible everywhere without shadows or darkening
+// Ambient lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
 scene.add(ambientLight);
 
@@ -247,77 +401,85 @@ let isDragging = false;
 let previousMousePosition = { x: 0, y: 0 };
 let rotation = { x: 0, y: 0 };
 
-// Mouse events
 document.addEventListener('mousedown', (e) => {
     isDragging = true;
     previousMousePosition = { x: e.clientX, y: e.clientY };
 });
 
 document.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
-    
-    const deltaX = e.clientX - previousMousePosition.x;
-    const deltaY = e.clientY - previousMousePosition.y;
-    
-    rotation.y += deltaX * 0.005;
-    rotation.x -= deltaY * 0.005;
-    
-    rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
-    
-    card.rotation.y = rotation.y;
-    card.rotation.x = rotation.x;
-    
-    previousMousePosition = { x: e.clientX, y: e.clientY };
+    onPointerMove(e);
+    if (!isDragging) updateHover();
+
+    if (isDragging && card) {
+        const deltaX = e.clientX - previousMousePosition.x;
+        const deltaY = e.clientY - previousMousePosition.y;
+        rotation.y += deltaX * 0.005;
+        rotation.x -= deltaY * 0.005;
+        rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
+        card.rotation.y = rotation.y;
+        card.rotation.x = rotation.x;
+        previousMousePosition = { x: e.clientX, y: e.clientY };
+    }
 });
 
-document.addEventListener('mouseup', () => {
-    isDragging = false;
-});
+document.addEventListener('mouseup', () => { isDragging = false; });
 
-// Touch events
-let touchStart = { x: 0, y: 0 };
+document.getElementById('canvas').addEventListener('pointerleave', () => {
+    pointer.x = -999;
+    pointer.y = -999;
+    updateHover();
+});
 
 document.addEventListener('touchstart', (e) => {
     e.preventDefault();
     isDragging = true;
     const touch = e.touches[0];
-    touchStart = { x: touch.clientX, y: touch.clientY };
+    if (touch) {
+        onPointerMove(touch);
+        touchStart = { x: touch.clientX, y: touch.clientY };
+    }
 });
 
+let touchStart = { x: 0, y: 0 };
 document.addEventListener('touchmove', (e) => {
     if (!isDragging) return;
     e.preventDefault();
-    
     const touch = e.touches[0];
-    const deltaX = touch.clientX - touchStart.x;
-    const deltaY = touch.clientY - touchStart.y;
-    
-    rotation.y += deltaX * 0.005;
-    rotation.x -= deltaY * 0.005;
-    
-    rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
-    
-    card.rotation.y = rotation.y;
-    card.rotation.x = rotation.x;
-    
-    touchStart = { x: touch.clientX, y: touch.clientY };
+    if (touch && card) {
+        onPointerMove(touch);
+        const deltaX = touch.clientX - touchStart.x;
+        const deltaY = touch.clientY - touchStart.y;
+        rotation.y += deltaX * 0.005;
+        rotation.x -= deltaY * 0.005;
+        rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
+        card.rotation.y = rotation.y;
+        card.rotation.x = rotation.x;
+        touchStart = { x: touch.clientX, y: touch.clientY };
+    }
 });
 
 document.addEventListener('touchend', () => {
     isDragging = false;
+    pointer.x = -999;
+    pointer.y = -999;
+    updateHover();
 });
 
-// Handle window resize
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Animation loop
 function animate() {
     requestAnimationFrame(animate);
+    if (!card) {
+        initCard();
+    }
+    if (card) {
+        const target = isHovering ? 1 : 0;
+        hoverUniform.value += (target - hoverUniform.value) * HOVER_LERP;
+    }
     renderer.render(scene, camera);
 }
-
 animate();
