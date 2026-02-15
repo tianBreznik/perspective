@@ -71,10 +71,11 @@ function renderTextToTexture(textItems, opts = {}) {
     const w = opts.width || Math.round(TEXTURE_SIZE);
     const h = opts.height || Math.round(TEXTURE_SIZE / textureAspect);
     const rt = new THREE.WebGLRenderTarget(w, h, {
-        minFilter: THREE.LinearFilter,
+        minFilter: THREE.LinearMipmapLinearFilter,
         magFilter: THREE.LinearFilter,
         format: THREE.RGBAFormat,
         type: THREE.UnsignedByteType,
+        generateMipmaps: true,
     });
 
     const orthoScene = new THREE.Scene();
@@ -130,6 +131,9 @@ function renderTextToTexture(textItems, opts = {}) {
     rt.texture.flipY = false;
     rt.texture.wrapS = THREE.ClampToEdgeWrapping;
     rt.texture.wrapT = THREE.ClampToEdgeWrapping;
+    rt.texture.minFilter = THREE.LinearMipmapLinearFilter;
+    rt.texture.generateMipmaps = true;
+    rt.texture.anisotropy = Math.min(16, maxAnisotropy);
     return rt.texture;
 }
 
@@ -195,12 +199,12 @@ function renderPerspectiveTextures(textFont, size) {
     const colorGroup = buildLetterMeshes('Perspective', textFont, size, i => colors[i]);
 
     const rtMask = new THREE.WebGLRenderTarget(w, h, {
-        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
+        minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType, generateMipmaps: true,
     });
     const rtColors = new THREE.WebGLRenderTarget(w, h, {
-        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
+        minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType, generateMipmaps: true,
     });
 
     const prevRt = renderer.getRenderTarget();
@@ -229,6 +233,7 @@ function renderPerspectiveTextures(textFont, size) {
         tex.flipY = false;
         tex.wrapS = THREE.ClampToEdgeWrapping;
         tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.anisotropy = Math.min(16, maxAnisotropy);
     });
 
     return { mask: rtMask.texture, colors: rtColors.texture };
@@ -250,9 +255,10 @@ const attributionY = quoteY - quoteHeight - 0.02;
 
 const BACK_UV_FLIP_X = true;
 const hoverUniform = { value: 0 };
+const noHoverUniform = { value: 0 };
 const HOVER_LERP = 0.08;
 
-function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, letterColorsTexture = null) {
+function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, letterColorsTexture = null, enableHover = true) {
     const mat = new THREE.MeshStandardMaterial({
         ...baseProps,
         map: paperColorTexture,
@@ -270,7 +276,7 @@ function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, 
 
     mat.onBeforeCompile = (shader) => {
         shader.uniforms.uTextMask = { value: textMaskTexture };
-        shader.uniforms.uHover = hoverUniform;
+        shader.uniforms.uHover = enableHover ? hoverUniform : noHoverUniform;
         if (letterColorsTexture) shader.uniforms.uLetterColors = { value: letterColorsTexture };
 
         // Pass raw face UV (0-1) for text mask - vMapUv is scaled by map repeat
@@ -294,7 +300,7 @@ function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, 
         const inject = `
             vec4 textSample = texture2D(uTextMask, ${uvSample});
             float raw = 1.0 - textSample.r;
-            float inText = smoothstep(0.15, 0.75, raw);
+            float inText = smoothstep(0.0, 0.95, raw);
             float darken = inText * (1.0 - uHover * 0.5) * 1.0;
             vec3 darkened = outgoingLight * (1.0 - darken);
             vec3 hoverColor = ${hoverColor};
@@ -350,8 +356,8 @@ function initCard() {
         { text: '— Charlotte Emma Aitchison', font: baskervvilleFont, size: quoteTextSize * 0.85, x: quoteX + 0.1, y: attributionY }
     ]);
 
-    const frontMaterial = createEngravedMaterial({}, frontTextTexture, false, frontLetterColorsTexture);
-    const backMaterial = createEngravedMaterial({}, backTextTexture, BACK_UV_FLIP_X);
+    const frontMaterial = createEngravedMaterial({}, frontTextTexture, false, frontLetterColorsTexture, true);
+    const backMaterial = createEngravedMaterial({}, backTextTexture, BACK_UV_FLIP_X, null, false);
 
     const cardGeometry = new THREE.BoxGeometry(cardWidth, cardHeight, cardDepth, 256, 256);
     card = new THREE.Mesh(cardGeometry, [
