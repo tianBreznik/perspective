@@ -5,17 +5,18 @@ const fs = require('fs');
 const path = require('path');
 const archiver = require('archiver');
 
-const passDir = path.join(__dirname, 'wallet-pass', 'pass');
+const passDir = path.join(__dirname, 'wallet-pass', 'perspective.pass');
 const outputFile = path.join(__dirname, 'perspective-card.pkpass');
 
 // Check if pass directory exists and has required files
 if (!fs.existsSync(passDir)) {
-    console.error('❌ Error: wallet-pass/pass/ directory not found!');
+    console.error('❌ Error: wallet-pass/perspective.pass/ directory not found!');
     console.error('   Run generate-wallet-pass.js first');
     process.exit(1);
 }
 
-if (!fs.existsSync(path.join(passDir, 'pass.json'))) {
+const passJsonPath = path.join(passDir, 'pass.json');
+if (!fs.existsSync(passJsonPath)) {
     console.error('❌ Error: pass.json not found!');
     console.error('   Run generate-wallet-pass.js first');
     process.exit(1);

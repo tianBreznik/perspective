@@ -300,7 +300,7 @@ function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, 
         const inject = `
             vec4 textSample = texture2D(uTextMask, ${uvSample});
             float raw = 1.0 - textSample.r;
-            float inText = smoothstep(0.0, 0.95, raw);
+            float inText = smoothstep(-0.05, 0.95, raw);
             float darken = inText * (1.0 - uHover * 0.5) * 1.0;
             vec3 darkened = outgoingLight * (1.0 - darken);
             vec3 hoverColor = ${hoverColor};
@@ -402,10 +402,13 @@ function updateHover() {
 const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
 scene.add(ambientLight);
 
-// Rotation controls
+// Rotation controls with damping
 let isDragging = false;
 let previousMousePosition = { x: 0, y: 0 };
 let rotation = { x: 0, y: 0 };
+let velocity = { x: 0, y: 0 };
+const ROTATION_SENSITIVITY = 0.005;
+const DAMPING = 0.96;
 
 document.addEventListener('mousedown', (e) => {
     isDragging = true;
@@ -419,11 +422,13 @@ document.addEventListener('mousemove', (e) => {
     if (isDragging && card) {
         const deltaX = e.clientX - previousMousePosition.x;
         const deltaY = e.clientY - previousMousePosition.y;
-        rotation.y += deltaX * 0.005;
-        rotation.x -= deltaY * 0.005;
+        const dx = deltaX * ROTATION_SENSITIVITY;
+        const dy = -deltaY * ROTATION_SENSITIVITY;
+        rotation.y += dx;
+        rotation.x += dy;
         rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
-        card.rotation.y = rotation.y;
-        card.rotation.x = rotation.x;
+        velocity.y = dx;
+        velocity.x = dy;
         previousMousePosition = { x: e.clientX, y: e.clientY };
     }
 });
@@ -455,11 +460,13 @@ document.addEventListener('touchmove', (e) => {
         onPointerMove(touch);
         const deltaX = touch.clientX - touchStart.x;
         const deltaY = touch.clientY - touchStart.y;
-        rotation.y += deltaX * 0.005;
-        rotation.x -= deltaY * 0.005;
+        const dx = deltaX * ROTATION_SENSITIVITY;
+        const dy = -deltaY * ROTATION_SENSITIVITY;
+        rotation.y += dx;
+        rotation.x += dy;
         rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
-        card.rotation.y = rotation.y;
-        card.rotation.x = rotation.x;
+        velocity.y = dx;
+        velocity.x = dy;
         touchStart = { x: touch.clientX, y: touch.clientY };
     }
 });
@@ -477,6 +484,99 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// Wallet strip dimensions (@2x: 750x246)
+const STRIP_WIDTH = 750;
+const STRIP_HEIGHT = 246;
+
+function downloadWalletStrip() {
+    if (!card) {
+        console.warn('Card not ready yet');
+        return;
+    }
+    const prevRt = renderer.getRenderTarget();
+    const prevSize = renderer.getSize(new THREE.Vector2());
+    const prevPixelRatio = renderer.getPixelRatio();
+    const savedRotation = { x: card.rotation.x, y: card.rotation.y, z: card.rotation.z };
+    const savedHover = hoverUniform.value;
+
+    card.rotation.set(0, 0, 0);
+    hoverUniform.value = 0;
+
+    const stripAspect = STRIP_WIDTH / STRIP_HEIGHT;
+    const viewHeight = cardWidth / stripAspect;
+    const stripCamera = new THREE.OrthographicCamera(
+        -cardWidth / 2, cardWidth / 2,
+        viewHeight / 2, -viewHeight / 2,
+        0.1, 10
+    );
+    stripCamera.position.set(0, 0, 5);
+    stripCamera.lookAt(0, 0, 0);
+
+    const rt = new THREE.WebGLRenderTarget(STRIP_WIDTH, STRIP_HEIGHT, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+    });
+    renderer.setRenderTarget(rt);
+    renderer.setPixelRatio(1);
+    renderer.setSize(STRIP_WIDTH, STRIP_HEIGHT);
+    renderer.setClearColor(0xffffff, 1);
+    renderer.clear();
+    renderer.render(scene, stripCamera);
+
+    const pixels = new Uint8Array(STRIP_WIDTH * STRIP_HEIGHT * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, STRIP_WIDTH, STRIP_HEIGHT, pixels);
+    rt.dispose();
+
+    const canvas = document.createElement('canvas');
+    canvas.width = STRIP_WIDTH;
+    canvas.height = STRIP_HEIGHT;
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.createImageData(STRIP_WIDTH, STRIP_HEIGHT);
+    for (let y = 0; y < STRIP_HEIGHT; y++) {
+        for (let x = 0; x < STRIP_WIDTH; x++) {
+            const srcRow = STRIP_HEIGHT - 1 - y;
+            const src = (srcRow * STRIP_WIDTH + x) * 4;
+            const dst = (y * STRIP_WIDTH + x) * 4;
+            imageData.data[dst] = pixels[src];
+            imageData.data[dst + 1] = pixels[src + 1];
+            imageData.data[dst + 2] = pixels[src + 2];
+            imageData.data[dst + 3] = pixels[src + 3];
+        }
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    const download = (blob, filename) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const canvas1x = document.createElement('canvas');
+    canvas1x.width = 375;
+    canvas1x.height = 123;
+    canvas1x.getContext('2d').drawImage(canvas, 0, 0, 375, 123);
+
+    canvas.toBlob((blob) => {
+        download(blob, 'strip@2x.png');
+        canvas1x.toBlob((b) => {
+            setTimeout(() => download(b, 'strip.png'), 300);
+        });
+    });
+
+    card.rotation.set(savedRotation.x, savedRotation.y, savedRotation.z);
+    hoverUniform.value = savedHover;
+    renderer.setRenderTarget(prevRt);
+    renderer.setPixelRatio(prevPixelRatio);
+    renderer.setSize(prevSize.x, prevSize.y);
+}
+
+document.getElementById('download-strip')?.addEventListener('click', downloadWalletStrip);
+
 function animate() {
     requestAnimationFrame(animate);
     if (!card) {
@@ -485,6 +585,16 @@ function animate() {
     if (card) {
         const target = isHovering ? 1 : 0;
         hoverUniform.value += (target - hoverUniform.value) * HOVER_LERP;
+
+        if (!isDragging) {
+            rotation.y += velocity.y;
+            rotation.x += velocity.x;
+            rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
+            velocity.y *= DAMPING;
+            velocity.x *= DAMPING;
+        }
+        card.rotation.x = rotation.x;
+        card.rotation.y = rotation.y;
     }
     renderer.render(scene, camera);
 }

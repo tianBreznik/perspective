@@ -9,13 +9,16 @@
     "preview": "vite preview",
     "generate-wallet-pass": "node generate-wallet-pass.js",
     "create-pkpass": "node create-pkpass.js",
-    "wallet-pass": "npm run generate-wallet-pass && npm run create-pkpass"
+    "create-pkpass-signed": "node create-pkpass-signed.js",
+    "wallet-pass": "npm run generate-wallet-pass && npm run create-pkpass",
+    "wallet-pass-signed": "npm run generate-wallet-pass && npm run create-pkpass-signed"
   },
   "dependencies": {
     "three": "^0.161.0"
   },
   "devDependencies": {
     "archiver": "^7.0.1",
+    "passkit-generator": "^3.5.7",
     "typescript": "^5.5.3",
     "vite": "^5.0.0"
   },

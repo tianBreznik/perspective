@@ -10,3 +10,9 @@ yarn-error.log*
 .pnp.js
 
 .vscode/*
+
+# Apple Wallet certificates (keep these private!)
+certs/*.pem
+certs/*.p12
+certs/*.cer
+!certs/CERTIFICATES.md

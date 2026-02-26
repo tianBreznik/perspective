@@ -1,131 +1,98 @@
 # Creating an Apple Wallet Pass
 
-This guide will help you create an Apple Wallet pass (.pkpass file) that opens your 3D business card website.
+This guide helps you create an Apple Wallet pass (.pkpass) that opens your 3D business card website.
 
 ## Quick Start
 
-1. **Set your website URL** (after deployment):
+### Unsigned pass (testing)
+
+1. **Generate pass structure**:
    ```bash
    export WEBSITE_URL="https://tianbreznik.github.io/perspective"
    npm run generate-wallet-pass
    ```
 
-2. **Generate images**:
-   - Open `wallet-pass/generate-images.html` in your browser
-   - Click "Download All Images"
-   - Move `icon.png`, `logo.png`, and `logo@2x.png` to `wallet-pass/pass/`
+2. **Create images**:
+   - **Strip (card front)**: Open the 3D card in your browser, click "Download Wallet Strip", move `strip.png` and `strip@2x.png` to `wallet-pass/perspective.pass/`
+   - **Icon & logo**: Open `wallet-pass/generate-images.html`, click "Download All Images", move `icon.png`, `logo.png`, and `logo@2x.png` to `wallet-pass/perspective.pass/`
 
-3. **Create the .pkpass file**:
+3. **Create .pkpass**:
    ```bash
    npm run create-pkpass
    ```
 
-4. **Share the pass**:
-   - The file `perspective-card.pkpass` will be created
-   - Share it via AirDrop, email, or host it on your website
+Unsigned passes work for local testing (e.g. Simulator or your own device) but may not add on all devices.
 
-## Detailed Steps
+### Signed pass (production, after Apple Developer setup)
 
-### Step 1: Deploy Your Website
+1. Complete the unsigned steps above
+2. Set up certificates (see [certs/CERTIFICATES.md](certs/CERTIFICATES.md))
+3. **Create signed .pkpass**:
+   ```bash
+   export APPLE_TEAM_ID="YOUR_TEAM_ID"
+   npm run create-pkpass-signed
+   ```
 
-First, deploy your website to a public URL (Vercel, Netlify, etc.). You'll need this URL for the pass.
+## Commands
 
-### Step 2: Generate Pass Structure
+| Command | Description |
+|--------|-------------|
+| `npm run generate-wallet-pass` | Creates `wallet-pass/perspective.pass/` and `pass.json` |
+| `npm run create-pkpass` | Builds unsigned `.pkpass` |
+| `npm run create-pkpass-signed` | Builds signed `.pkpass` (requires certs) |
+| `npm run wallet-pass` | generate + create (unsigned) |
+| `npm run wallet-pass-signed` | generate + create (signed) |
 
-```bash
-WEBSITE_URL="https://tianbreznik.github.io/perspective" npm run generate-wallet-pass
+## Structure
+
+```
+wallet-pass/
+├── perspective.pass/     # Pass model (pass.json + images)
+│   ├── pass.json
+│   ├── icon.png
+│   ├── logo.png
+│   ├── logo@2x.png
+│   ├── strip.png        # optional: card front banner
+│   └── strip@2x.png
+├── generate-images.html
+└── ...
+
+certs/                    # For signed passes
+├── wwdr.pem
+├── signerCert.pem
+├── signerKey.pem
+└── CERTIFICATES.md       # Full setup guide
 ```
 
-This creates:
-- `wallet-pass/pass/pass.json` - The pass configuration
-- `wallet-pass/generate-images.html` - Image generator tool
+## Signing (production)
 
-### Step 3: Create Images
+To distribute passes that add on any iPhone:
 
-1. Open `wallet-pass/generate-images.html` in your browser
-2. Click "Download All Images"
-3. Move the downloaded files to `wallet-pass/pass/`:
-   - `icon.png` (1024x1024)
-   - `logo.png` (320x100)
-   - `logo@2x.png` (640x200)
-
-**Or create custom images:**
-- Icon: 1024x1024 PNG (will be scaled down for different sizes)
-- Logo: 320x100 PNG (standard) and 640x200 PNG (@2x)
-
-### Step 4: Package the Pass
-
-```bash
-npm run create-pkpass
-```
-
-This creates `perspective-card.pkpass` in your project root.
-
-### Step 5: Test on iPhone
-
-1. Transfer `perspective-card.pkpass` to your iPhone:
-   - AirDrop it
-   - Email it to yourself
-   - Upload to iCloud Files
-   - Host it on a website and open the link
-
-2. Open the file on your iPhone
-3. Tap "Add" when prompted
-4. The card will appear in your Wallet app!
-
-### Step 6: Share with Others
-
-**Option A: Direct File Share**
-- Send the `.pkpass` file via AirDrop, email, or messaging
-
-**Option B: Web Link**
-- Host the `.pkpass` file on your website
-- Create a link: `<a href="perspective-card.pkpass">Add to Wallet</a>`
-- When users tap the link on iOS, it will automatically open in Wallet
-
-**Option C: QR Code**
-- Generate a QR code pointing to your `.pkpass` file URL
-- Users scan the QR code to add to Wallet
+1. Join the [Apple Developer Program](https://developer.apple.com/programs/)
+2. Create a Pass Type ID and signing certificate
+3. Convert and place certificates in `certs/`
+4. See **certs/CERTIFICATES.md** for step-by-step instructions
 
 ## Customization
 
-Edit `wallet-pass/pass/pass.json` to customize:
-- Colors (foregroundColor, backgroundColor)
-- Text fields
-- Organization name
-- Logo text
+Edit `wallet-pass/perspective.pass/pass.json`:
 
-## Important Notes
-
-⚠️ **Unsigned Passes**: The passes created by this script are unsigned. They will work for:
-- Testing on your own devices
-- Development purposes
-- Personal use
-
-For production/distribution, you may want to:
-- Sign the pass with an Apple Developer certificate
-- Use a service like PassKit or similar
-
-🔒 **Signing (Optional)**: To sign passes for wider distribution:
-1. Get an Apple Developer account
-2. Create a Pass Type ID
-3. Generate certificates
-4. Use a library like `node-passbook` with signing
+- `passTypeIdentifier` – must match your Apple Pass Type ID when signing
+- `teamIdentifier` – your Apple Team ID (when signing)
+- `foregroundColor`, `backgroundColor`, `labelColor`
+- Text fields under `generic`
+- `organizationName`, `logoText`
 
 ## Troubleshooting
 
-**Pass won't add to Wallet:**
-- Make sure the `.pkpass` file is a valid ZIP
-- Check that `pass.json` is valid JSON
-- Ensure images are PNG format
+**Pass won't add on a real device**  
+Use a signed pass (`create-pkpass-signed`) with valid certificates.
 
-**Images not showing:**
-- Verify image files are in `wallet-pass/pass/` directory
-- Check image dimensions match requirements
-- Ensure images are PNG format
+**"Invalid data" or "passTypeIdentifier/teamIdentifier" error**  
+Check that `pass.json` matches your certificate. See certs/CERTIFICATES.md.
 
-**Website doesn't open:**
-- Verify `WEBSITE_URL` is set correctly in `pass.json`
-- Make sure the website is publicly accessible
-- Check that the URL uses HTTPS (required for production)
+**Images not showing**  
+Ensure `icon.png`, `logo.png`, and `logo@2x.png` are in `wallet-pass/perspective.pass/`.
 
+**Website doesn't open**  
+Set `WEBSITE_URL` when generating, or edit `appLaunchURL` in `pass.json`. Must use HTTPS.

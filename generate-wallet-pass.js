@@ -11,13 +11,31 @@ const PASS_TYPE = 'generic'; // 'generic', 'coupon', 'eventTicket', etc.
 
 // Create pass directory structure
 const passDir = path.join(__dirname, 'wallet-pass');
-const passContentDir = path.join(passDir, 'pass');
+const passContentDir = path.join(passDir, 'perspective.pass');
+const oldPassDir = path.join(passDir, 'pass');
+
+// Migrate images from old pass/ folder if present
+const imageNames = ['icon.png', 'logo.png', 'logo@2x.png'];
+let savedImages = {};
+if (fs.existsSync(oldPassDir)) {
+    for (const name of imageNames) {
+        const src = path.join(oldPassDir, name);
+        if (fs.existsSync(src)) {
+            savedImages[name] = fs.readFileSync(src);
+        }
+    }
+}
 
 // Clean and create directories
 if (fs.existsSync(passDir)) {
     fs.rmSync(passDir, { recursive: true });
 }
 fs.mkdirSync(passContentDir, { recursive: true });
+
+// Restore migrated images
+for (const [name, buf] of Object.entries(savedImages)) {
+    fs.writeFileSync(path.join(passContentDir, name), buf);
+}
 
 // Generate pass.json
 const passJson = {
@@ -196,7 +214,8 @@ console.log('✓ Created image generator at wallet-pass/generate-images.html');
 console.log('\n📱 Next steps:');
 console.log('1. Open wallet-pass/generate-images.html in your browser');
 console.log('2. Click "Download All Images"');
-console.log('3. Move icon.png, logo.png, and logo@2x.png to wallet-pass/pass/');
-console.log('4. Run this script again to create the .pkpass file');
+console.log('3. Move icon.png, logo.png, and logo@2x.png to wallet-pass/perspective.pass/');
+console.log('4. For unsigned pass: npm run create-pkpass');
+console.log('   For signed pass:   npm run create-pkpass-signed (requires certificates)');
 console.log('\n⚠️  Note: You need to add the images before creating the .pkpass file');
 

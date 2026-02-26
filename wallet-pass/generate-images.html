@@ -29,8 +29,8 @@
             const ctx = canvas.getContext('2d');
             const size = canvas.width;
             
-            // White background
-            ctx.fillStyle = '#ffffff';
+            // Off-white background
+            ctx.fillStyle = '#f8f8f6';
             ctx.fillRect(0, 0, size, size);
             
             // Draw "P" for Perspective
@@ -46,16 +46,26 @@
             const width = canvas.width;
             const height = canvas.height;
             
-            // White background
-            ctx.fillStyle = '#ffffff';
+            // Off-white background with subtle paper texture
+            ctx.fillStyle = '#f8f8f6';
             ctx.fillRect(0, 0, width, height);
             
-            // Draw "Perspective" text
+            // Draw "Perspective" with vertically perturbed letters
+            const text = 'Perspective';
+            const fontSize = height * 0.4;
+            ctx.font = `bold ${fontSize}px serif`;
             ctx.fillStyle = '#000000';
-            ctx.font = `bold ${height * 0.4}px serif`;
-            ctx.textAlign = 'center';
+            ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText('Perspective', width / 2, height / 2);
+            const letterOffsets = [0.03, -0.02, 0.02, -0.03, 0.01, -0.02, 0.02, -0.01, 0.03, -0.02]; // vertical perturbation (fraction of fontSize)
+            const totalWidth = ctx.measureText(text).width;
+            let x = (width - totalWidth) / 2;
+            for (let i = 0; i < text.length; i++) {
+                const w = ctx.measureText(text[i]).width;
+                const y = height / 2 + (letterOffsets[i] || 0) * fontSize;
+                ctx.fillText(text[i], x, y);
+                x += w;
+            }
         }
         
         function downloadCanvas(canvas, filename) {

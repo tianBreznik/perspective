@@ -9,6 +9,8 @@
   "foregroundColor": "rgb(0, 0, 0)",
   "backgroundColor": "rgb(255, 255, 255)",
   "labelColor": "rgb(100, 100, 100)",
+  "webServiceURL": "https://tianbreznik.github.io/perspective",
+  "associatedStoreIdentifiers": [],
   "appLaunchURL": "https://tianbreznik.github.io/perspective",
   "userInfo": {
     "website": "https://tianbreznik.github.io/perspective"
