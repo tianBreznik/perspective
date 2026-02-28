@@ -28,3 +28,7 @@ body:active {
 #download-strip {
     display: none;
 }
+
+#download-background {
+    display: none;
+}

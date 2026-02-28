@@ -1,40 +1,27 @@
 {
   "formatVersion": 1,
-  "passTypeIdentifier": "pass.com.perspective.studio",
+  "passTypeIdentifier": "pass.com.distribute.perspective",
   "serialNumber": "perspective-001",
-  "teamIdentifier": "TEAM123456",
+  "teamIdentifier": "JJYL234FP7",
   "organizationName": "Perspective Studio",
   "description": "Perspective Studio Digital Business Card",
-  "logoText": "Perspective",
+  "logoText": " ",
   "foregroundColor": "rgb(0, 0, 0)",
-  "backgroundColor": "rgb(255, 255, 255)",
-  "labelColor": "rgb(100, 100, 100)",
-  "webServiceURL": "https://tianbreznik.github.io/perspective",
-  "associatedStoreIdentifiers": [],
-  "appLaunchURL": "https://tianbreznik.github.io/perspective",
-  "userInfo": {
-    "website": "https://tianbreznik.github.io/perspective"
-  },
-  "generic": {
+  "backgroundColor": "rgb(232, 229, 223)",
+  "labelColor": "rgb(213, 208, 200)",
+  "storeCard": {
     "primaryFields": [
       {
         "key": "name",
-        "label": "Perspective Studio",
-        "value": "Perspective Studio"
+        "label": " ",
+        "value": " "
       }
     ],
     "secondaryFields": [
       {
         "key": "tagline",
-        "label": "",
-        "value": "Building the web we want to live with, one system at a time"
-      }
-    ],
-    "auxiliaryFields": [
-      {
-        "key": "quote",
-        "label": "",
-        "value": "\"Did I lose my perspective?\""
+        "label": " ",
+        "value": "be interested... · based global"
       }
     ],
     "backFields": [
@@ -42,16 +29,6 @@
         "key": "website",
         "label": "Website",
         "value": "https://tianbreznik.github.io/perspective"
-      },
-      {
-        "key": "description",
-        "label": "Description",
-        "value": "Building the web we want to live with, one system at a time"
-      },
-      {
-        "key": "quote",
-        "label": "Quote",
-        "value": "\"Did I lose my perspective?\" — Charlotte Emma Aitchison"
       }
     ]
   }

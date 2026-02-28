@@ -58,10 +58,8 @@ async function createSignedPass() {
             },
             {
                 serialNumber: 'perspective-001',
-                passTypeIdentifier: 'pass.com.perspective.studio',
-                teamIdentifier: process.env.APPLE_TEAM_ID || 'TEAM123456',
-                webServiceURL: WEBSITE_URL,
-                appLaunchURL: WEBSITE_URL,
+                passTypeIdentifier: 'pass.com.distribute.perspective',
+                teamIdentifier: process.env.APPLE_TEAM_ID || 'JJYL234FP7',
             }
         );
 

@@ -331,6 +331,7 @@ const sideMaterial = new THREE.MeshStandardMaterial({
 });
 
 let card;
+let walletTextMaskTexture = null;
 
 function createHoverPlane(width, height, x, y, z, rotationY = 0) {
     const geom = new THREE.PlaneGeometry(width, height);
@@ -349,6 +350,7 @@ function createHoverPlane(width, height, x, y, z, rotationY = 0) {
 
 function initCard() {
     const { mask: frontTextTexture, colors: frontLetterColorsTexture } = renderPerspectiveTextures(font, 0.35);
+    walletTextMaskTexture = frontTextTexture;
 
     const backTextTexture = renderTextToTexture([
         { text: taglineText, font: baskervvilleFont, size: quoteTextSize * 0.75, x: quoteX, y: taglineY },
@@ -502,33 +504,43 @@ function downloadWalletStrip() {
     card.rotation.set(0, 0, 0);
     hoverUniform.value = 0;
 
+    // Render the text mask texture directly onto a fullscreen quad — no card mesh, no paper texture
+    const maskScene = new THREE.Scene();
+    // The text mask texture covers the card in card-space coords
+    // Zoom: show only the center portion of the card (0.72 of card width)
+    const stripZoom = 0.72;
     const stripAspect = STRIP_WIDTH / STRIP_HEIGHT;
-    const viewHeight = cardWidth / stripAspect;
-    const stripCamera = new THREE.OrthographicCamera(
-        -cardWidth / 2, cardWidth / 2,
-        viewHeight / 2, -viewHeight / 2,
-        0.1, 10
-    );
-    stripCamera.position.set(0, 0, 5);
-    stripCamera.lookAt(0, 0, 0);
+    const viewWidth = cardWidth * stripZoom;
+    const viewHeight = viewWidth / stripAspect;
+    const maskCamera = new THREE.OrthographicCamera(-viewWidth/2, viewWidth/2, viewHeight/2, -viewHeight/2, 0.1, 10);
+    maskCamera.position.set(0, 0, 1);
+    maskCamera.lookAt(0, 0, 0);
 
-    const rt = new THREE.WebGLRenderTarget(STRIP_WIDTH, STRIP_HEIGHT, {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-        type: THREE.UnsignedByteType,
+    // Fullscreen quad displaying the text mask texture
+    const quadGeom = new THREE.PlaneGeometry(cardWidth, cardHeight);
+    const quadMat = new THREE.MeshBasicMaterial({ map: walletTextMaskTexture, depthTest: false });
+    const quad = new THREE.Mesh(quadGeom, quadMat);
+    maskScene.add(quad);
+
+    const maskRt = new THREE.WebGLRenderTarget(STRIP_WIDTH, STRIP_HEIGHT, {
+        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
     });
-    renderer.setRenderTarget(rt);
+    renderer.setRenderTarget(maskRt);
     renderer.setPixelRatio(1);
     renderer.setSize(STRIP_WIDTH, STRIP_HEIGHT);
     renderer.setClearColor(0xffffff, 1);
     renderer.clear();
-    renderer.render(scene, stripCamera);
+    renderer.render(maskScene, maskCamera);
 
-    const pixels = new Uint8Array(STRIP_WIDTH * STRIP_HEIGHT * 4);
-    renderer.readRenderTargetPixels(rt, 0, 0, STRIP_WIDTH, STRIP_HEIGHT, pixels);
-    rt.dispose();
+    const maskPixels = new Uint8Array(STRIP_WIDTH * STRIP_HEIGHT * 4);
+    renderer.readRenderTargetPixels(maskRt, 0, 0, STRIP_WIDTH, STRIP_HEIGHT, maskPixels);
+    maskRt.dispose();
+    quadGeom.dispose();
+    quadMat.dispose();
 
+    // Composite: luminance from mask → solid paper color
+    const PAPER_R = 232, PAPER_G = 229, PAPER_B = 223;
     const canvas = document.createElement('canvas');
     canvas.width = STRIP_WIDTH;
     canvas.height = STRIP_HEIGHT;
@@ -539,10 +551,11 @@ function downloadWalletStrip() {
             const srcRow = STRIP_HEIGHT - 1 - y;
             const src = (srcRow * STRIP_WIDTH + x) * 4;
             const dst = (y * STRIP_WIDTH + x) * 4;
-            imageData.data[dst] = pixels[src];
-            imageData.data[dst + 1] = pixels[src + 1];
-            imageData.data[dst + 2] = pixels[src + 2];
-            imageData.data[dst + 3] = pixels[src + 3];
+            const lum = (maskPixels[src] * 0.299 + maskPixels[src+1] * 0.587 + maskPixels[src+2] * 0.114) / 255;
+            imageData.data[dst]   = Math.round(PAPER_R * lum);
+            imageData.data[dst+1] = Math.round(PAPER_G * lum);
+            imageData.data[dst+2] = Math.round(PAPER_B * lum);
+            imageData.data[dst+3] = 255;
         }
     }
     ctx.putImageData(imageData, 0, 0);
@@ -576,6 +589,114 @@ function downloadWalletStrip() {
 }
 
 document.getElementById('download-strip')?.addEventListener('click', downloadWalletStrip);
+
+// Oversized tall strip — provide portrait 750×1500 @2x and let Apple overflow/crop from bottom
+const ROT_STRIP_W = 750;
+const ROT_STRIP_H = 1500;
+
+function downloadWalletBackground() {
+    if (!card) {
+        console.warn('Card not ready yet');
+        return;
+    }
+    const prevRt = renderer.getRenderTarget();
+    const prevSize = renderer.getSize(new THREE.Vector2());
+    const prevPixelRatio = renderer.getPixelRatio();
+    const savedRotation = { x: card.rotation.x, y: card.rotation.y, z: card.rotation.z };
+    const savedHover = hoverUniform.value;
+
+    card.rotation.set(0, 0, 0);
+    hoverUniform.value = 0;
+
+    // Render card into portrait canvas — card fills width, centered vertically
+    const renderW = ROT_STRIP_W;
+    const renderH = ROT_STRIP_H;
+    const viewWidth = cardWidth;
+    const viewHeight = viewWidth * (renderH / renderW);
+    const bgCamera = new THREE.OrthographicCamera(
+        -viewWidth / 2, viewWidth / 2,
+        viewHeight / 2, -viewHeight / 2,
+        0.1, 10
+    );
+    bgCamera.position.set(0, 0, 5);
+    bgCamera.lookAt(0, 0, 0);
+
+    const rt = new THREE.WebGLRenderTarget(renderW, renderH, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+    });
+    renderer.setRenderTarget(rt);
+    renderer.setPixelRatio(1);
+    renderer.setSize(renderW, renderH);
+    renderer.setClearColor(0xffffff, 1);
+    renderer.clear();
+    renderer.render(scene, bgCamera);
+
+    const pixels = new Uint8Array(renderW * renderH * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, renderW, renderH, pixels);
+    rt.dispose();
+
+    // Flip WebGL Y
+    const portrait = document.createElement('canvas');
+    portrait.width = renderW;
+    portrait.height = renderH;
+    const pCtx = portrait.getContext('2d');
+    const imageData = pCtx.createImageData(renderW, renderH);
+    for (let y = 0; y < renderH; y++) {
+        for (let x = 0; x < renderW; x++) {
+            const srcRow = renderH - 1 - y;
+            const src = (srcRow * renderW + x) * 4;
+            const dst = (y * renderW + x) * 4;
+            imageData.data[dst] = pixels[src];
+            imageData.data[dst + 1] = pixels[src + 1];
+            imageData.data[dst + 2] = pixels[src + 2];
+            imageData.data[dst + 3] = pixels[src + 3];
+        }
+    }
+    pCtx.putImageData(imageData, 0, 0);
+
+    const download = (blob, filename) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    // Rotate 90° CCW — text reads bottom-to-top in the final strip
+    const rotated2x = document.createElement('canvas');
+    rotated2x.width = renderW;
+    rotated2x.height = renderH;
+    const rCtx = rotated2x.getContext('2d');
+    rCtx.translate(0, renderH);
+    rCtx.rotate(-Math.PI / 2);
+    // After -90° rotation, original (renderW x renderH) becomes (renderH x renderW) visually
+    // Draw portrait centered in the rotated space
+    rCtx.drawImage(portrait, 0, 0, renderH, renderW);
+
+    const strip1x = document.createElement('canvas');
+    strip1x.width = ROT_STRIP_W / 2;
+    strip1x.height = ROT_STRIP_H / 2;
+    strip1x.getContext('2d').drawImage(rotated2x, 0, 0, ROT_STRIP_W / 2, ROT_STRIP_H / 2);
+
+    rotated2x.toBlob((blob) => {
+        download(blob, 'strip@2x.png');
+        strip1x.toBlob((b) => {
+            setTimeout(() => download(b, 'strip.png'), 300);
+        });
+    });
+
+    card.rotation.set(savedRotation.x, savedRotation.y, savedRotation.z);
+    hoverUniform.value = savedHover;
+    renderer.setRenderTarget(prevRt);
+    renderer.setPixelRatio(prevPixelRatio);
+    renderer.setSize(prevSize.x, prevSize.y);
+}
+
+document.getElementById('download-background')?.addEventListener('click', downloadWalletBackground);
 
 function animate() {
     requestAnimationFrame(animate);
