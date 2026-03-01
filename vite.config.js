@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/perspective/', // GitHub Pages base path
+  base: '/',
   server: {
     host: '0.0.0.0', // Bind to all interfaces for network access
     port: 3000,
