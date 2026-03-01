@@ -11,6 +11,7 @@ import colorMap from './src/assets/textures/Paper001_2K-JPG/Paper001_2K-JPG_Colo
 import normalMap from './src/assets/textures/Paper001_2K-JPG/Paper001_2K-JPG_NormalGL.jpg';
 import roughnessMap from './src/assets/textures/Paper001_2K-JPG/Paper001_2K-JPG_Roughness.jpg';
 import displacementMap from './src/assets/textures/Paper001_2K-JPG/Paper001_2K-JPG_Displacement.jpg';
+import stickerSrc from './src/assets/reretouchedemoji.png';
 
 // Scene setup
 const scene = new THREE.Scene();
@@ -353,7 +354,6 @@ function initCard() {
     walletTextMaskTexture = frontTextTexture;
 
     const backTextTexture = renderTextToTexture([
-        { text: taglineText, font: baskervvilleFont, size: quoteTextSize * 0.75, x: quoteX, y: taglineY },
         { text: '"Did I lose my perspective?"', font: baskervvilleFont, size: quoteTextSize, x: quoteX, y: quoteY },
         { text: '— Charlotte Emma Aitchison', font: baskervvilleFont, size: quoteTextSize * 0.85, x: quoteX + 0.1, y: attributionY }
     ]);
@@ -368,6 +368,120 @@ function initCard() {
         backMaterial,
     ]);
     scene.add(card);
+
+    // Sticker fixed in scene behind the card — doesn't rotate with card
+    textureLoader.load(stickerSrc, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
+        tex.anisotropy = Math.min(16, maxAnisotropy);
+        tex.needsUpdate = true;
+        const aspect = tex.image.width / tex.image.height;
+        const stickerH = cardHeight * 6.0;
+        const stickerW = stickerH * aspect;
+        const stickerGeom = new THREE.PlaneGeometry(stickerW, stickerH);
+        const stickerMat = new THREE.MeshBasicMaterial({
+            map: tex,
+            transparent: true,
+            depthWrite: false,
+            side: THREE.FrontSide,
+        });
+        const stickerMesh = new THREE.Mesh(stickerGeom, stickerMat);
+        stickerMesh.position.set(0, 4.0, -2.5);
+        scene.add(stickerMesh);
+
+        // Every opaque pixel becomes one particle. The mesh and particles overlap
+        // at full opacity at t=0; as t progresses the mesh fades out while particles
+        // drift and fade — so there is never a visible "swap".
+        const imgW = tex.image.width;
+        const imgH = tex.image.height;
+        const offscreen = document.createElement('canvas');
+        offscreen.width = imgW;
+        offscreen.height = imgH;
+        const octx = offscreen.getContext('2d');
+        octx.drawImage(tex.image, 0, 0);
+        const imgData = octx.getImageData(0, 0, imgW, imgH).data;
+
+        // Collect every opaque pixel (downsample by stride so GPU isn't overwhelmed)
+        const STRIDE = 3; // sample every Nth pixel in each axis; 1 = every pixel
+        const pixelList = [];
+        for (let py = 0; py < imgH; py += STRIDE) {
+            for (let px = 0; px < imgW; px += STRIDE) {
+                const idx = (py * imgW + px) * 4;
+                if (imgData[idx + 3] < 30) continue;
+                pixelList.push({ px, py, r: imgData[idx] / 255, g: imgData[idx + 1] / 255, b: imgData[idx + 2] / 255 });
+            }
+        }
+        const ACTUAL_COUNT = pixelList.length;
+
+        const positions = new Float32Array(ACTUAL_COUNT * 3);
+        const initPos   = new Float32Array(ACTUAL_COUNT * 3);
+        const colors    = new Float32Array(ACTUAL_COUNT * 3);
+        const pvx       = new Float32Array(ACTUAL_COUNT);
+        const pvy       = new Float32Array(ACTUAL_COUNT);
+
+        for (let i = 0; i < ACTUAL_COUNT; i++) {
+            const { px, py, r, g, b } = pixelList[i];
+            const wx = ((px / imgW) - 0.5) * stickerW;
+            const wy = (0.5 - (py / imgH)) * stickerH;
+            initPos[i * 3]     = positions[i * 3]     = wx;
+            initPos[i * 3 + 1] = positions[i * 3 + 1] = wy;
+            initPos[i * 3 + 2] = positions[i * 3 + 2] = 0;
+            colors[i * 3]     = r;
+            colors[i * 3 + 1] = g;
+            colors[i * 3 + 2] = b;
+            pvx[i] = (Math.random() - 0.5) * 0.5;
+            pvy[i] = 0.3 + Math.random() * 0.6;
+        }
+
+        const partGeom = new THREE.BufferGeometry();
+        partGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        partGeom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+        const partMat = new THREE.PointsMaterial({
+            size: STRIDE * (stickerW / imgW),  // particle covers same area as the source pixels
+            vertexColors: true,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            sizeAttenuation: true,
+        });
+        const particles = new THREE.Points(partGeom, partMat);
+        particles.position.set(0, 4.0, -2.49);
+        scene.add(particles);
+
+        const CROSSFADE = 0.3; // fraction of DUST_DURATION spent blending mesh → particles
+        const DUST_DURATION = 2.5;
+        let dustTime = 0;
+        let dusting  = false;
+
+        setTimeout(() => { dusting = true; }, 1000);
+
+        window._stickerUpdate = (delta) => {
+            if (!dusting) return;
+            dustTime += delta;
+            const t = Math.min(dustTime / DUST_DURATION, 1.0);
+
+            // Crossfade: mesh fades out over first CROSSFADE fraction while particles ramp up
+            const crossT = Math.min(t / CROSSFADE, 1.0);
+            stickerMat.opacity = 1.0 - crossT;
+            // Particles go from 0 → 1 during crossfade, then 1 → 0 for the rest
+            partMat.opacity = crossT * (1.0 - Math.max(0, (t - CROSSFADE) / (1.0 - CROSSFADE)));
+
+            const pos = partGeom.attributes.position.array;
+            for (let i = 0; i < ACTUAL_COUNT; i++) {
+                pos[i * 3]     = initPos[i * 3]     + pvx[i] * t * DUST_DURATION;
+                pos[i * 3 + 1] = initPos[i * 3 + 1] + pvy[i] * t * DUST_DURATION;
+            }
+            partGeom.attributes.position.needsUpdate = true;
+
+            if (t >= 1.0) {
+                stickerMesh.visible = false;
+                particles.visible   = false;
+                dusting = false;
+            }
+        };
+    });
 
     // Hover hit planes - bounding rectangles for each text item
     const pad = 0.03;
@@ -698,8 +812,13 @@ function downloadWalletBackground() {
 
 document.getElementById('download-background')?.addEventListener('click', downloadWalletBackground);
 
+let lastTime = performance.now();
 function animate() {
     requestAnimationFrame(animate);
+    const now = performance.now();
+    const delta = (now - lastTime) / 1000;
+    lastTime = now;
+    if (window._stickerUpdate) window._stickerUpdate(delta);
     if (!card) {
         initCard();
     }
