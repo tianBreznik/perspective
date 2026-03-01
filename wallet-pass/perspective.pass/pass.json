@@ -3,7 +3,7 @@
   "passTypeIdentifier": "pass.com.distribute.perspective",
   "serialNumber": "perspective-001",
   "teamIdentifier": "JJYL234FP7",
-  "organizationName": "Perspective Studio",
+  "organizationName": "Perspective Stu",
   "description": "Perspective Studio Digital Business Card",
   "logoText": " ",
   "foregroundColor": "rgb(0, 0, 0)",
@@ -28,7 +28,7 @@
       {
         "key": "website",
         "label": "Website",
-        "value": "https://tianbreznik.github.io/perspective"
+        "value": "https://perspective.credit"
       }
     ]
   }
