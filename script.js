@@ -658,36 +658,62 @@ document.getElementById('canvas').addEventListener('pointerleave', () => {
 
 document.addEventListener('click', (e) => {
     onPointerMove(e);
-    if (!card) return;
+    tryEmailClick();
+});
+
+// Shared helper to trigger email click from current pointer / raycast
+function tryEmailClick() {
+    if (!card) return false;
     raycaster.setFromCamera(pointer, camera);
     const hits = raycaster.intersectObject(card, true);
     const emailHit = hits.find(hit => hit.object.userData.isHoverPlane && hit.object.userData.kind === 'email');
     if (emailHit) {
+        // Briefly force hover state so the email highlights blue even on quick taps
+        isHoveringEmail = true;
+        setTimeout(() => { isHoveringEmail = false; }, 180);
         window.location.href = 'mailto:tian@perspective.credit';
+        return true;
     }
-});
-
-document.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    isDragging = true;
-    const touch = e.touches[0];
-    if (touch) {
-        onPointerMove(touch);
-        touchStart = { x: touch.clientX, y: touch.clientY };
-    }
-});
+    return false;
+}
 
 let touchStart = { x: 0, y: 0 };
-document.addEventListener('touchmove', (e) => {
-    if (!isDragging) return;
-    e.preventDefault();
+let touchStartTime = 0;
+let touchMoved = false;
+
+document.addEventListener('touchstart', (e) => {
     const touch = e.touches[0];
-    if (touch && card) {
-        onPointerMove(touch);
-        const deltaX = touch.clientX - touchStart.x;
-        const deltaY = touch.clientY - touchStart.y;
-        const dx = deltaX * ROTATION_SENSITIVITY;
-        const dy = -deltaY * ROTATION_SENSITIVITY;
+    if (!touch) return;
+    touchStartTime = performance.now();
+    touchMoved = false;
+    isDragging = false; // treat as potential tap first
+    onPointerMove(touch);
+    touchStart = { x: touch.clientX, y: touch.clientY };
+});
+
+document.addEventListener('touchmove', (e) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    const moveX = touch.clientX - touchStart.x;
+    const moveY = touch.clientY - touchStart.y;
+    const distSq = moveX * moveX + moveY * moveY;
+    // If finger moves more than ~10px, switch to drag/rotate mode
+    if (distSq > 100) {
+        touchMoved = true;
+        isDragging = true;
+    }
+
+    onPointerMove(touch);
+    if (!isDragging) {
+        // Update hover highlight under finger when not dragging
+        updateHover();
+        return;
+    }
+
+    if (card) {
+        e.preventDefault();
+        const dx = moveX * ROTATION_SENSITIVITY;
+        const dy = -moveY * ROTATION_SENSITIVITY;
         rotation.y += dx;
         rotation.x += dy;
         rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
@@ -697,7 +723,21 @@ document.addEventListener('touchmove', (e) => {
     }
 });
 
-document.addEventListener('touchend', () => {
+document.addEventListener('touchend', (e) => {
+    const dt = performance.now() - touchStartTime;
+    const wasTap = !touchMoved && dt < 300;
+
+    if (wasTap) {
+        const touch = e.changedTouches[0];
+        if (touch) {
+            onPointerMove(touch);
+            // Treat tap as click: may trigger email link if on email plane
+            if (tryEmailClick()) {
+                e.preventDefault();
+            }
+        }
+    }
+
     isDragging = false;
     pointer.x = -999;
     pointer.y = -999;
