@@ -240,26 +240,38 @@ function renderPerspectiveTextures(textFont, size) {
     return { mask: rtMask.texture, colors: rtColors.texture };
 }
 
-// Back: tagline, quote, attribution layout
+// Back: quote, attribution, contact email layout
 const quoteTextSize = 0.08;
 const quoteX = -cardWidth / 2 + 0.15;
 const quoteY = -cardHeight / 2 + 0.25;
-const taglineText = '... building the web we want to live with, one system at a time';
 const _quoteGeom = new TextGeometry('"Did I lose my perspective?"', {
     font: baskervvilleFont, size: quoteTextSize, height: 0.001, curveSegments: 20, bevelEnabled: false
 });
 _quoteGeom.computeBoundingBox();
 const quoteHeight = _quoteGeom.boundingBox.max.y - _quoteGeom.boundingBox.min.y;
 _quoteGeom.dispose();
-const taglineY = quoteY + quoteHeight + 0.05;
+
 const attributionY = quoteY - quoteHeight - 0.02;
+
+// Email on back face, bottom-right area
+const emailText = 'tian@perspective.credit';
+const _emailGeom = new TextGeometry(emailText, {
+    font: baskervvilleFont, size: quoteTextSize, height: 0.001, curveSegments: 20, bevelEnabled: false
+});
+_emailGeom.computeBoundingBox();
+const emailWidth = _emailGeom.boundingBox.max.x - _emailGeom.boundingBox.min.x;
+const emailHeight = _emailGeom.boundingBox.max.y - _emailGeom.boundingBox.min.y;
+_emailGeom.dispose();
+const emailX = cardWidth / 2 - 0.15 - emailWidth;
+const emailY = quoteY;
 
 const BACK_UV_FLIP_X = true;
 const hoverUniform = { value: 0 };
+const backHoverUniform = { value: 0 };
 const noHoverUniform = { value: 0 };
-const HOVER_LERP = 0.08;
+const HOVER_LERP = 0.28;
 
-function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, letterColorsTexture = null, enableHover = true) {
+function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, letterColorsTexture = null, enableHover = true, hoverUniformOverride = null, emailMaskTexture = null) {
     const mat = new THREE.MeshStandardMaterial({
         ...baseProps,
         map: paperColorTexture,
@@ -275,10 +287,13 @@ function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, 
         metalness: 0,
     });
 
+    const hoverSource = enableHover ? (hoverUniformOverride || hoverUniform) : noHoverUniform;
+
     mat.onBeforeCompile = (shader) => {
         shader.uniforms.uTextMask = { value: textMaskTexture };
-        shader.uniforms.uHover = enableHover ? hoverUniform : noHoverUniform;
+        shader.uniforms.uHover = hoverSource;
         if (letterColorsTexture) shader.uniforms.uLetterColors = { value: letterColorsTexture };
+        if (emailMaskTexture) shader.uniforms.uEmailMask = { value: emailMaskTexture };
 
         // Pass raw face UV (0-1) for text mask - vMapUv is scaled by map repeat
         shader.vertexShader = shader.vertexShader.replace(
@@ -289,23 +304,30 @@ function createEngravedMaterial(baseProps, textMaskTexture, flipBackUV = false, 
             '#include <uv_vertex>',
             '#include <uv_vertex>\nvEngravedUv = uv;'
         );
-        const uniformDecl = letterColorsTexture
+        let uniformDecl = letterColorsTexture
             ? 'uniform sampler2D uTextMask;\nuniform sampler2D uLetterColors;\nuniform float uHover;\nvarying vec2 vEngravedUv;\n'
             : 'uniform sampler2D uTextMask;\nuniform float uHover;\nvarying vec2 vEngravedUv;\n';
+        if (emailMaskTexture) uniformDecl += 'uniform sampler2D uEmailMask;\n';
         shader.fragmentShader = uniformDecl + shader.fragmentShader;
 
         const uvSample = flipBackUV ? 'vec2(1.0 - vEngravedUv.x, vEngravedUv.y)' : 'vEngravedUv';
         const hoverColor = letterColorsTexture
             ? 'texture2D(uLetterColors, ' + uvSample + ').rgb'
-            : 'vec3(0.04, 0.08, 0.5)';
+            : (emailMaskTexture ? 'vec3(0.25, 0.45, 0.95)' : 'vec3(0.04, 0.08, 0.5)');
+        // Email-only hover: sample same-sized mask (email = black). Same uvSample as back texture.
+        const emailGate = emailMaskTexture
+            ? `float inEmailRect = 1.0 - smoothstep(0.3, 0.6, texture2D(uEmailMask, ${uvSample}).r);`
+            : 'float inEmailRect = 1.0;';
         const inject = `
             vec4 textSample = texture2D(uTextMask, ${uvSample});
             float raw = 1.0 - textSample.r;
             float inText = smoothstep(-0.05, 0.95, raw);
-            float darken = inText * (1.0 - uHover * 0.5) * 1.0;
+            ${emailGate}
+            float hoverAmount = inText * inEmailRect * uHover;
+            float darken = inText * (1.0 - hoverAmount * 0.5) * 1.0;
             vec3 darkened = outgoingLight * (1.0 - darken);
             vec3 hoverColor = ${hoverColor};
-            outgoingLight = mix(darkened, hoverColor, uHover * inText * 1.0);
+            outgoingLight = mix(darkened, hoverColor, hoverAmount * 1.0);
         `;
         shader.fragmentShader = shader.fragmentShader.replace(
             '#include <opaque_fragment>',
@@ -340,6 +362,7 @@ function createHoverPlane(width, height, x, y, z, rotationY = 0) {
         transparent: true,
         opacity: 0,
         depthWrite: false,
+        depthTest: false, // always render on top (used for hover/debug planes)
         side: THREE.DoubleSide,
     });
     const plane = new THREE.Mesh(geom, mat);
@@ -355,10 +378,17 @@ function initCard() {
 
     const backTextTexture = renderTextToTexture([
         { text: '"Did I lose my perspective?"', font: baskervvilleFont, size: quoteTextSize, x: quoteX, y: quoteY },
-        { text: '— Charlotte Emma Aitchison', font: baskervvilleFont, size: quoteTextSize * 0.85, x: quoteX + 0.1, y: attributionY }
+        { text: '— Charlotte Emma Aitchison', font: baskervvilleFont, size: quoteTextSize * 0.85, x: quoteX + 0.1, y: attributionY },
+        { text: emailText, font: baskervvilleFont, size: quoteTextSize, x: emailX, y: emailY }
+    ]);
+
+    // Email-only mask: same ortho/size as back texture so UVs match; only email is black.
+    const backEmailMaskTexture = renderTextToTexture([
+        { text: emailText, font: baskervvilleFont, size: quoteTextSize, x: emailX, y: emailY }
     ]);
 
     const frontMaterial = createEngravedMaterial({}, frontTextTexture, false, frontLetterColorsTexture, true);
+    // Back face: no hover (avoids fade on quote). Email hover is done by overlay below.
     const backMaterial = createEngravedMaterial({}, backTextTexture, BACK_UV_FLIP_X, null, false);
 
     const cardGeometry = new THREE.BoxGeometry(cardWidth, cardHeight, cardDepth, 256, 256);
@@ -368,6 +398,45 @@ function initCard() {
         backMaterial,
     ]);
     scene.add(card);
+
+    // Overlay on back: blue only over email when hovered (same UV space as back face)
+    const overlayZ = -cardDepth / 2 + 0.002;
+    const overlayGeom = new THREE.PlaneGeometry(cardWidth, cardHeight);
+    const overlayMat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        depthTest: false,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uEmailMask: { value: backEmailMaskTexture },
+            uHover: backHoverUniform,
+        },
+        vertexShader: `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform sampler2D uEmailMask;
+            uniform float uHover;
+            varying vec2 vUv;
+            void main() {
+                vec2 uvSample = vUv;
+                float mask = texture2D(uEmailMask, uvSample).r;
+                float inEmail = 1.0 - smoothstep(0.15, 0.7, mask);
+                vec3 blue = vec3(0.25, 0.45, 0.95);
+                float alpha = inEmail * uHover;
+                gl_FragColor = vec4(blue, alpha);
+            }
+        `,
+    });
+    const overlayMesh = new THREE.Mesh(overlayGeom, overlayMat);
+    overlayMesh.position.set(0, 0, overlayZ);
+    overlayMesh.rotation.y = Math.PI;
+    overlayMesh.renderOrder = 1;
+    card.add(overlayMesh);
 
     // Sticker fixed in scene behind the card — doesn't rotate with card
     textureLoader.load(stickerSrc, (tex) => {
@@ -404,7 +473,7 @@ function initCard() {
         const imgData = octx.getImageData(0, 0, imgW, imgH).data;
 
         // Collect every opaque pixel (downsample by stride so GPU isn't overwhelmed)
-        const STRIDE = 3; // sample every Nth pixel in each axis; 1 = every pixel
+        const STRIDE = 1; // sample every Nth pixel in each axis; 1 = every pixel
         const pixelList = [];
         for (let py = 0; py < imgH; py += STRIDE) {
             for (let px = 0; px < imgW; px += STRIDE) {
@@ -439,7 +508,7 @@ function initCard() {
         partGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         partGeom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
         const partMat = new THREE.PointsMaterial({
-            size: STRIDE * (stickerW / imgW),  // particle covers same area as the source pixels
+            size: STRIDE * (stickerW / imgW) * 0.1,  // half-pixel size for finer dust
             vertexColors: true,
             transparent: true,
             opacity: 0,
@@ -483,10 +552,14 @@ function initCard() {
         };
     });
 
-    // Hover hit planes - bounding rectangles for each text item
+    // Hover hit planes - bounding rectangles for each interactive text item
     const pad = 0.03;
+    // Front face: plane just in front of card so ray hits it when viewing front
     const frontZ = cardDepth / 2 + 0.001;
+    // Back face: plane just in front of back (between camera and back surface) so ray hits it when viewing back
+    const backZ = -cardDepth / 2 + 0.001;
 
+    // Front title hover area — centered on front face, normal +Z
     const perspGeom = new TextGeometry('Perspective', { font, size: 0.35, height: 0.001, curveSegments: 8, bevelEnabled: false });
     perspGeom.computeBoundingBox();
     const pw = perspGeom.boundingBox.max.x - perspGeom.boundingBox.min.x + pad * 2;
@@ -494,13 +567,31 @@ function initCard() {
     perspGeom.dispose();
 
     const frontPlane = createHoverPlane(pw, ph, 0, 0, frontZ, 0);
+    frontPlane.userData.kind = 'frontTitle';
     card.add(frontPlane);
+
+    // Back email hover area — mirrored in X because the back face is viewed after a 180° Y rotation
+    // and the back material also flips UVs horizontally. Using the mirrored X center lines the plane
+    // up visually with the engraved email text on the back-right.
+    const emailCenterX = emailX + emailWidth / 2;
+    const mirroredCenterX = -emailCenterX;
+    const emailPlane = createHoverPlane(
+        emailWidth + pad * 2,
+        emailHeight + pad * 2,
+        mirroredCenterX,
+        emailY + emailHeight / 2,
+        backZ,
+        Math.PI
+    );
+    emailPlane.userData.kind = 'email';
+    card.add(emailPlane);
 }
 
-// Raycaster for hover
+// Raycaster for hover / click
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let isHovering = false;
+let isHoveringEmail = false;
 
 function onPointerMove(event) {
     pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -511,7 +602,15 @@ function updateHover() {
     if (!card) return;
     raycaster.setFromCamera(pointer, camera);
     const hits = raycaster.intersectObject(card, true);
-    isHovering = hits.some(hit => hit.object.userData.isHoverPlane);
+    isHovering = false;
+    isHoveringEmail = false;
+
+    for (const hit of hits) {
+        if (!hit.object.userData.isHoverPlane) continue;
+        const kind = hit.object.userData.kind;
+        if (kind === 'frontTitle') isHovering = true;
+        if (kind === 'email') isHoveringEmail = true;
+    }
 }
 
 // Ambient lighting
@@ -555,6 +654,17 @@ document.getElementById('canvas').addEventListener('pointerleave', () => {
     pointer.x = -999;
     pointer.y = -999;
     updateHover();
+});
+
+document.addEventListener('click', (e) => {
+    onPointerMove(e);
+    if (!card) return;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(card, true);
+    const emailHit = hits.find(hit => hit.object.userData.isHoverPlane && hit.object.userData.kind === 'email');
+    if (emailHit) {
+        window.location.href = 'mailto:tian@perspective.credit';
+    }
 });
 
 document.addEventListener('touchstart', (e) => {
@@ -825,6 +935,9 @@ function animate() {
     if (card) {
         const target = isHovering ? 1 : 0;
         hoverUniform.value += (target - hoverUniform.value) * HOVER_LERP;
+
+        const emailTarget = isHoveringEmail ? 1 : 0;
+        backHoverUniform.value += (emailTarget - backHoverUniform.value) * HOVER_LERP;
 
         if (!isDragging) {
             rotation.y += velocity.y;
