@@ -9,7 +9,7 @@ A 3D interactive business card built with Three.js.
 - 3D rendered business card with paper texture
 - Interactive rotation (drag to rotate)
 - Responsive design for mobile and desktop
-- Apple Wallet pass support
+- Apple Wallet (`.pkpass`) and Google Wallet (signed save link) on the **Add to Wallet** button
 - Progressive Web App (PWA) ready
 
 ## Development
@@ -29,13 +29,15 @@ npm run build
 
 Automatically deploys to GitHub Pages on push to `master` branch.
 
-## Apple Wallet Pass
+## Wallet passes (Apple & Google)
 
-Generate a Wallet pass that links to the website:
+**iPhone:** generate a `.pkpass` that links to the site:
 
 ```bash
 npm run generate-wallet-pass
 npm run create-pkpass
 ```
 
-See `WALLET-PASS.md` for detailed instructions.
+**Android (Google Wallet):** there is no static file. After you complete [Google Wallet API](https://developers.google.com/wallet/generic) onboarding and can produce a signed “Add to Google Wallet” URL, set **`VITE_GOOGLE_WALLET_SAVE_URL`** or **`VITE_GOOGLE_WALLET_JWT`** at build time (see `.env.example`). Without that, Android users get the contact-card `.vcf` fallback.
+
+See **`WALLET-PASS.md`** for full instructions.

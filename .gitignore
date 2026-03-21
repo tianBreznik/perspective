@@ -11,8 +11,14 @@ yarn-error.log*
 
 .vscode/*
 
+# Env files (Wallet JWTs, keys)
+.env
+.env.local
+.env.*.local
+
 # Apple Wallet certificates (keep these private!)
 certs/*.pem
 certs/*.p12
 certs/*.cer
 !certs/CERTIFICATES.md
+.env.example

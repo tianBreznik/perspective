@@ -12,6 +12,7 @@ import normalMap from './src/assets/textures/Paper001_2K-JPG/Paper001_2K-JPG_Nor
 import roughnessMap from './src/assets/textures/Paper001_2K-JPG/Paper001_2K-JPG_Roughness.jpg';
 import displacementMap from './src/assets/textures/Paper001_2K-JPG/Paper001_2K-JPG_Displacement.jpg';
 import stickerSrc from './src/assets/reretouchedemoji.png';
+import walletPassUrl from './perspective-card.pkpass?url';
 
 // Scene setup
 const scene = new THREE.Scene();
@@ -962,6 +963,181 @@ function downloadWalletBackground() {
 
 document.getElementById('download-background')?.addEventListener('click', downloadWalletBackground);
 
+function isAndroidDevice() {
+    return /Android/i.test(navigator.userAgent || '');
+}
+
+function publicAssetUrl(filename) {
+    const base = import.meta.env.BASE || '/';
+    const normalized = base.endsWith('/') ? base : `${base}/`;
+    return `${normalized}${filename}`.replace(/([^:]\/)\/+/g, '$1');
+}
+
+/** Full Add to Google Wallet URL, or built from JWT — see WALLET-PASS.md (Google Wallet). */
+function getGoogleWalletSaveUrl() {
+    const explicit = import.meta.env.VITE_GOOGLE_WALLET_SAVE_URL;
+    if (explicit && String(explicit).trim()) {
+        return String(explicit).trim();
+    }
+    const jwt = import.meta.env.VITE_GOOGLE_WALLET_JWT;
+    if (jwt && String(jwt).trim()) {
+        return `https://pay.google.com/gp/v/save/${String(jwt).trim()}`;
+    }
+    return null;
+}
+
+document.getElementById('download-wallet-pass')?.addEventListener('click', () => {
+    if (isAndroidDevice()) {
+        const googleSave = getGoogleWalletSaveUrl();
+        if (googleSave) {
+            window.open(googleSave, '_blank', 'noopener,noreferrer');
+            return;
+        }
+        // No Google Wallet JWT configured — contact card still useful on Android
+        const a = document.createElement('a');
+        a.rel = 'noopener';
+        a.href = publicAssetUrl('perspective-android.vcf');
+        a.download = 'perspective-studio.vcf';
+        a.click();
+        return;
+    }
+    const a = document.createElement('a');
+    a.href = walletPassUrl;
+    a.download = 'perspective-card.pkpass';
+    a.rel = 'noopener';
+    a.click();
+});
+
+// ---- Level 2 glass refraction (scene-sampled) for wallet pass button ----
+const walletGlassCanvas = document.getElementById('wallet-pass-glass');
+const walletGlassButton = document.getElementById('download-wallet-pass');
+const walletGlassCtx = walletGlassCanvas?.getContext('2d', { alpha: true, willReadFrequently: true }) || null;
+const walletGlassSrcCanvas = document.createElement('canvas');
+const walletGlassSrcCtx = walletGlassSrcCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
+let walletGlassBuf = null;
+let walletGlassLastW = 0;
+let walletGlassLastH = 0;
+
+function clamp(v, min, max) {
+    return v < min ? min : (v > max ? max : v);
+}
+
+function sampleChannel(src, w, h, x, y, channel) {
+    const sx = clamp(x | 0, 0, w - 1);
+    const sy = clamp(y | 0, 0, h - 1);
+    return src[(sy * w + sx) * 4 + channel];
+}
+
+function renderWalletButtonRefraction(timeSec) {
+    if (!walletGlassCanvas || !walletGlassButton || !walletGlassCtx || !walletGlassSrcCtx) return;
+    const rect = walletGlassButton.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(2, Math.round(rect.width * dpr));
+    const h = Math.max(2, Math.round(rect.height * dpr));
+    if (walletGlassCanvas.width !== w || walletGlassCanvas.height !== h) {
+        walletGlassCanvas.width = w;
+        walletGlassCanvas.height = h;
+        walletGlassSrcCanvas.width = w;
+        walletGlassSrcCanvas.height = h;
+        walletGlassLastW = w;
+        walletGlassLastH = h;
+        walletGlassBuf = new Uint8ClampedArray(w * h * 4);
+    }
+
+    const srcScaleX = renderer.domElement.width / window.innerWidth;
+    const srcScaleY = renderer.domElement.height / window.innerHeight;
+    const sx = rect.left * srcScaleX;
+    const sy = rect.top * srcScaleY;
+    const sw = rect.width * srcScaleX;
+    const sh = rect.height * srcScaleY;
+
+    walletGlassSrcCtx.clearRect(0, 0, w, h);
+    walletGlassSrcCtx.drawImage(renderer.domElement, sx, sy, sw, sh, 0, 0, w, h);
+
+    // Draw button label into the source layer so it sits "behind" glass and gets refracted.
+    const label = 'Add to Wallet';
+    walletGlassSrcCtx.save();
+    walletGlassSrcCtx.textAlign = 'center';
+    walletGlassSrcCtx.textBaseline = 'middle';
+    walletGlassSrcCtx.font = `${Math.round(h * 0.40)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif`;
+    walletGlassSrcCtx.fillStyle = 'rgba(36, 40, 48, 0.88)';
+    walletGlassSrcCtx.fillText(label, w * 0.5, h * 0.53);
+    walletGlassSrcCtx.restore();
+
+    const srcData = walletGlassSrcCtx.getImageData(0, 0, w, h);
+    const src = srcData.data;
+    if (!walletGlassBuf || walletGlassLastW !== w || walletGlassLastH !== h) {
+        walletGlassBuf = new Uint8ClampedArray(w * h * 4);
+    }
+    const out = walletGlassBuf;
+
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const invMax = 1 / Math.max(cx, cy);
+    const t = timeSec;
+    const strength = 4.4 * dpr;
+    const chroma = 1.45 * dpr;
+
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4;
+            const nx = (x - cx) * invMax;
+            const ny = (y - cy) * invMax;
+            const r2 = nx * nx + ny * ny;
+            const edge = clamp((r2 - 0.35) * 1.6, 0, 1);
+
+            const lens = Math.pow(1 - clamp(r2, 0, 1), 1.2) * 1.75;
+            const micro =
+                Math.sin(x * 0.22 + y * 0.11) * 0.22 +
+                Math.cos(x * 0.15 - y * 0.19) * 0.18;
+            // Very subtle animated component to keep the glass alive without looking liquid
+            const drift =
+                Math.sin((x + y) * 0.03 + t * 0.9) * 0.12 +
+                Math.cos((x - y) * 0.02 - t * 0.75) * 0.1;
+            const dx = (nx * 1.28 * lens + micro * 0.45 + drift * 0.5) * strength;
+            const dy = (ny * 0.98 * lens + micro * 0.3 + drift * 0.3) * strength * 0.8;
+
+            const rx = x + dx + chroma;
+            const gx = x + dx;
+            const bx = x + dx - chroma;
+            const syy = y + dy;
+
+            let r = sampleChannel(src, w, h, rx, syy, 0);
+            let g = sampleChannel(src, w, h, gx, syy, 1);
+            let b = sampleChannel(src, w, h, bx, syy, 2);
+
+            // Fresnel-like brightening near edges to sell curved glass
+            const fres = Math.pow(edge, 1.6) * 42;
+            r = clamp(r + fres, 0, 255);
+            g = clamp(g + fres * 0.95, 0, 255);
+            b = clamp(b + fres * 1.08, 0, 255);
+
+            out[i] = r;
+            out[i + 1] = g;
+            out[i + 2] = b;
+            out[i + 3] = 255;
+        }
+    }
+
+    const outData = new ImageData(out, w, h);
+    walletGlassCtx.putImageData(outData, 0, 0);
+
+    // Smoked tint overlay and top sheen for 3D depth
+    walletGlassCtx.save();
+    walletGlassCtx.globalCompositeOperation = 'source-over';
+    walletGlassCtx.fillStyle = 'rgba(118, 124, 136, 0.30)';
+    walletGlassCtx.fillRect(0, 0, w, h);
+    const sheen = walletGlassCtx.createLinearGradient(0, 0, 0, h);
+    sheen.addColorStop(0, 'rgba(255,255,255,0.26)');
+    sheen.addColorStop(0.42, 'rgba(255,255,255,0.05)');
+    sheen.addColorStop(1, 'rgba(0,0,0,0.08)');
+    walletGlassCtx.fillStyle = sheen;
+    walletGlassCtx.fillRect(0, 0, w, h);
+    walletGlassCtx.restore();
+}
+
 let lastTime = performance.now();
 function animate() {
     requestAnimationFrame(animate);
@@ -990,5 +1166,6 @@ function animate() {
         card.rotation.y = rotation.y;
     }
     renderer.render(scene, camera);
+    renderWalletButtonRefraction(now * 0.001);
 }
 animate();

@@ -96,3 +96,30 @@ Ensure `icon.png`, `logo.png`, and `logo@2x.png` are in `wallet-pass/perspective
 
 **Website doesn't open**  
 Set `WEBSITE_URL` when generating, or edit `appLaunchURL` in `pass.json`. Must use HTTPS.
+
+---
+
+## Google Wallet (Android)
+
+Unlike Apple’s `.pkpass`, **Google Wallet passes are not a static file**. You create a **Passes class + object** in [Google Wallet API](https://developers.google.com/wallet/generic), then sign a JWT with your **Google Cloud service account** and open:
+
+`https://pay.google.com/gp/v/save/<signed_jwt>`
+
+Users must be signed into a Google account on the device.
+
+### Wire up this site
+
+1. Complete Google’s [onboarding](https://developers.google.com/wallet/generic/getting-started/onboarding-guide) and create a **Generic** (or other) pass class/object.
+2. Build a **signed JWT** as in [Issuing passes for web](https://developers.google.com/wallet/generic/web) and [JWT reference](https://developers.google.com/wallet/generic/web/jwt).  
+   - JWTs expire; production setups usually **mint a new JWT on a small backend** or in CI before deploy.
+3. Expose the full save URL to the front end (pick one):
+   - **`VITE_GOOGLE_WALLET_SAVE_URL`** — entire URL, e.g. `https://pay.google.com/gp/v/save/eyJhbGci...`
+   - **`VITE_GOOGLE_WALLET_JWT`** — only the JWT segment (after `/save/`).
+
+Copy `.env.example` → `.env.local` for local dev. For GitHub Pages / Vite builds, set these in your host’s **build environment** (e.g. GitHub Actions secrets → `env` for `npm run build`).
+
+**Note:** Keep the service account JSON **off** the client; only the **resulting save URL** (or a short-lived URL from your API) belongs in `VITE_*` vars.
+
+### If no Google URL is configured
+
+On Android, the button falls back to downloading **`public/perspective-android.vcf`** (contact card) so the site still does something useful.
