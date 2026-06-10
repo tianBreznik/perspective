@@ -12,7 +12,8 @@
     "create-pkpass-signed": "node create-pkpass-signed.js",
     "wallet-pass": "npm run generate-wallet-pass && npm run create-pkpass",
     "wallet-pass-signed": "npm run generate-wallet-pass && npm run create-pkpass-signed",
-    "bake-project-textures": "node scripts/bake-project-textures.mjs"
+    "bake-project-textures": "node scripts/bake-project-textures.mjs",
+    "generate-favicons": "node scripts/generate-favicon-pngs.mjs"
   },
   "dependencies": {
     "three": "^0.161.0"
