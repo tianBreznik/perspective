@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'path';
 
 export default defineConfig({
   base: '/',
@@ -9,6 +10,13 @@ export default defineConfig({
     open: true,
     allowedHosts: true, // Allow any host (needed for LAN access)
   },
-  publicDir: 'public' // Serve files from public directory
+  publicDir: 'public', // Serve files from public directory
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+      },
+    },
+  },
 });
 

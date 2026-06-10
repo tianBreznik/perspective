@@ -2,14 +2,261 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CV</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CV.pdf</title>
     <style>
-        * { margin: 0; padding: 0; }
-        html, body { width: 100%; height: 100%; overflow: hidden; background: #fff; }
-        embed { width: 100%; height: 100%; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; background: #fff; overflow: hidden; }
+        #cv-viewport {
+            height: 100%;
+            overflow-x: hidden;
+            overflow-y: auto;
+            touch-action: pan-y;
+            -webkit-overflow-scrolling: touch;
+        }
+        #cv-viewport.is-zoomed {
+            overflow: hidden;
+            touch-action: none;
+        }
+        #cv-zoom-layer {
+            transform-origin: 0 0;
+            will-change: transform;
+        }
+        #cv-pages {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+        #cv-pages canvas {
+            display: block;
+        }
+        .cv-error {
+            padding: 24px;
+            font: 13px/1.5 Menlo, Monaco, "Courier New", monospace;
+            color: #333;
+        }
     </style>
 </head>
 <body>
-    <embed src="/CV_2026_5.pdf#view=FitV" type="application/pdf">
+    <div id="cv-viewport">
+        <div id="cv-zoom-layer">
+            <div id="cv-pages"></div>
+        </div>
+    </div>
+    <script type="module">
+        const PDFJS_VERSION = '4.10.38';
+        const CDN = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}`;
+        const pdfjsLib = await import(`${CDN}/build/pdf.min.mjs`);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `${CDN}/build/pdf.worker.min.mjs`;
+
+        const PDF_URL = new URL('/CV_2026_5.pdf', window.location.href).href;
+        const viewport = document.getElementById('cv-viewport');
+        const zoomLayer = document.getElementById('cv-zoom-layer');
+        const pages = document.getElementById('cv-pages');
+
+        function clamp(v, min, max) {
+            return v < min ? min : (v > max ? max : v);
+        }
+
+        let scale = 1;
+        let translateX = 0;
+        let translateY = 0;
+        const MIN_SCALE = 1;
+        const MAX_SCALE = 4;
+
+        function isZoomed() {
+            return scale > 1.001;
+        }
+
+        function captureScrollIntoTranslate() {
+            translateY = -viewport.scrollTop;
+            translateX = 0;
+            viewport.scrollTop = 0;
+        }
+
+        function restoreScrollFromTranslate() {
+            const scrollTop = Math.max(0, -translateY);
+            scale = 1;
+            translateX = 0;
+            translateY = 0;
+            zoomLayer.style.transform = '';
+            viewport.classList.remove('is-zoomed');
+            viewport.scrollTop = scrollTop;
+        }
+
+        function applyTransform() {
+            if (!isZoomed()) {
+                zoomLayer.style.transform = '';
+                viewport.classList.remove('is-zoomed');
+                return;
+            }
+            viewport.classList.add('is-zoomed');
+            zoomLayer.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+        }
+
+        function zoomAt(clientX, clientY, newScale) {
+            if (scale <= 1 && newScale > 1) captureScrollIntoTranslate();
+
+            const rect = viewport.getBoundingClientRect();
+            const cx = clientX - rect.left;
+            const cy = clientY - rect.top;
+            const ratio = newScale / scale;
+            translateX = cx - ratio * (cx - translateX);
+            translateY = cy - ratio * (cy - translateY);
+            scale = newScale;
+
+            if (scale <= 1.001) {
+                restoreScrollFromTranslate();
+                return;
+            }
+            applyTransform();
+        }
+
+        let pinchStartDist = 0;
+        let pinchStartScale = 1;
+        let pinchStartTranslate = { x: 0, y: 0 };
+        let isPanning = false;
+        let panStart = { x: 0, y: 0 };
+        let lastTap = 0;
+        let zoomGestureActive = false;
+        let pinchScrollCaptured = false;
+
+        function touchDistance(touches) {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.hypot(dx, dy);
+        }
+
+        viewport.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                isPanning = false;
+                zoomGestureActive = true;
+                pinchScrollCaptured = false;
+                pinchStartDist = touchDistance(e.touches);
+                pinchStartScale = scale;
+                pinchStartTranslate = { x: translateX, y: translateY };
+            } else if (e.touches.length === 1 && isZoomed()) {
+                zoomGestureActive = true;
+                isPanning = true;
+                panStart = {
+                    x: e.touches[0].clientX - translateX,
+                    y: e.touches[0].clientY - translateY,
+                };
+            }
+        }, { passive: true });
+
+        viewport.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                if (!pinchScrollCaptured && scale <= 1) {
+                    captureScrollIntoTranslate();
+                    pinchScrollCaptured = true;
+                    pinchStartScale = scale;
+                    pinchStartTranslate = { x: translateX, y: translateY };
+                }
+                const dist = touchDistance(e.touches);
+                const newScale = clamp(pinchStartScale * (dist / pinchStartDist), MIN_SCALE, MAX_SCALE);
+                const center = {
+                    x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                    y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+                };
+                const rect = viewport.getBoundingClientRect();
+                const cx = center.x - rect.left;
+                const cy = center.y - rect.top;
+                const ratio = newScale / pinchStartScale;
+                translateX = cx - ratio * (cx - pinchStartTranslate.x);
+                translateY = cy - ratio * (cy - pinchStartTranslate.y);
+                scale = newScale;
+                applyTransform();
+            } else if (isPanning && e.touches.length === 1 && isZoomed()) {
+                e.preventDefault();
+                translateX = e.touches[0].clientX - panStart.x;
+                translateY = e.touches[0].clientY - panStart.y;
+                applyTransform();
+            }
+        }, { passive: false });
+
+        viewport.addEventListener('touchend', (e) => {
+            if (e.touches.length > 0) return;
+            isPanning = false;
+
+            // Only reset scroll position when leaving zoom — not after normal scroll.
+            if (zoomGestureActive && scale <= 1.001) {
+                if (pinchScrollCaptured) {
+                    restoreScrollFromTranslate();
+                } else {
+                    viewport.classList.remove('is-zoomed');
+                }
+            }
+            zoomGestureActive = false;
+            pinchScrollCaptured = false;
+
+            const now = Date.now();
+            if (now - lastTap < 280 && e.changedTouches.length === 1) {
+                const t = e.changedTouches[0];
+                if (isZoomed()) {
+                    restoreScrollFromTranslate();
+                } else {
+                    zoomAt(t.clientX, t.clientY, 2.5);
+                }
+                lastTap = 0;
+            } else {
+                lastTap = now;
+            }
+        });
+
+        viewport.addEventListener('wheel', (e) => {
+            // Desktop: normal wheel scrolls; ctrl/cmd + wheel zooms (like browsers/maps).
+            if (!e.ctrlKey && !e.metaKey) return;
+            e.preventDefault();
+            const factor = e.deltaY < 0 ? 1.08 : 0.92;
+            zoomAt(e.clientX, e.clientY, clamp(scale * factor, MIN_SCALE, MAX_SCALE));
+        }, { passive: false });
+
+        async function waitForLayout() {
+            for (let i = 0; i < 40; i++) {
+                if (pages.clientWidth > 0) return;
+                await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+        }
+
+        try {
+            await waitForLayout();
+
+            const pdf = await pdfjsLib.getDocument({
+                url: PDF_URL,
+                cMapUrl: `${CDN}/cmaps/`,
+                cMapPacked: true,
+                standardFontDataUrl: `${CDN}/standard_fonts/`,
+            }).promise;
+
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            const maxWidth = Math.max(200, pages.clientWidth - 24);
+
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                const baseViewport = page.getViewport({ scale: 1 });
+                const renderScale = (maxWidth / baseViewport.width) * dpr;
+                const pageViewport = page.getViewport({ scale: renderScale });
+
+                const canvas = document.createElement('canvas');
+                canvas.width = pageViewport.width;
+                canvas.height = pageViewport.height;
+                canvas.style.width = `${maxWidth}px`;
+                canvas.style.height = `${pageViewport.height / dpr}px`;
+                pages.appendChild(canvas);
+
+                await page.render({
+                    canvasContext: canvas.getContext('2d'),
+                    viewport: pageViewport,
+                }).promise;
+            }
+        } catch (err) {
+            console.error('CV render failed:', err);
+            pages.innerHTML = '<p class="cv-error">Could not load CV.</p>';
+        }
+    </script>
 </body>
 </html>

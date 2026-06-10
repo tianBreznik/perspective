@@ -280,10 +280,7 @@ body:active {
     border-radius: 8px;
     background: #ececec;
     border: 1px solid rgba(55, 55, 55, 0.55);
-    box-shadow:
-        0 1px 1px rgba(0, 0, 0, 0.2),
-        0 10px 24px rgba(0, 0, 0, 0.34),
-        0 32px 70px rgba(0, 0, 0, 0.45);
+    box-shadow: none;
     overflow: hidden;
 }
 
@@ -316,48 +313,38 @@ body:active {
     pointer-events: none;
 }
 
-/* Red traffic-light close button */
+/* Red traffic-light close button (desktop-style popups) */
 .popup-window .dialog-close {
-    order: -1;
-    position: relative;
-    width: 30px;
-    height: 30px;
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
     background: transparent;
     border: none;
-    border-radius: 50%;
-    font-size: 0;
+    border-radius: 4px;
+    font-size: 22px;
+    line-height: 1;
+    color: rgba(0, 0, 0, 0.5);
     flex: 0 0 auto;
+    -webkit-tap-highlight-color: transparent;
+    outline: none;
 }
 
 .popup-window .dialog-close:hover {
-    background: transparent;
+    color: rgba(0, 0, 0, 0.75);
+    background: rgba(0, 0, 0, 0.06);
 }
 
-.popup-window .dialog-close::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 15px;
-    height: 15px;
-    transform: translate(-50%, -50%);
-    border-radius: 50%;
-    border: 1px solid rgba(148, 44, 37, 0.8);
-    background: radial-gradient(circle at 35% 28%, #ffd9d4, #f07b6f 45%, #da4036 72%, #b22d25);
-    box-shadow:
-        inset 0 1px 1px rgba(255, 255, 255, 0.6),
-        0 1px 1px rgba(0, 0, 0, 0.22);
-}
-
+.popup-window .dialog-close::before,
 .popup-window .dialog-close::after {
-    content: '\00d7';
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -54%);
-    font-size: 12px;
-    line-height: 1;
-    color: rgba(80, 18, 14, 0.7);
+    display: none;
+}
+
+.popup-window .popup-action {
+    margin-left: auto;
+    margin-right: 34px;
 }
 
 /* Embossed Aqua-style button (CV download) */
@@ -394,6 +381,13 @@ body:active {
     background: #fff;
 }
 
+.popup-window--editor .popup-title {
+    font-family: Menlo, Monaco, "Courier New", Courier, monospace;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
 /* Live project frame projected onto the card back */
 #project-frame {
     position: fixed;
@@ -423,6 +417,12 @@ body:active {
 }
 
 @media (max-width: 768px) {
+    .section-dialog::backdrop {
+        background: transparent;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
     .wallet-pass-dock {
         right: 8px;
         bottom: 8px;
@@ -450,6 +450,9 @@ body:active {
         max-height: 82vh;
         border-radius: 8px;
         margin: auto;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
 
     .dialog-content {

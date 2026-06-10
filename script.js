@@ -1929,6 +1929,14 @@ function updateProjectFrameOverlay() {
     projectFrameEl.style.pointerEvents = interactive ? 'auto' : 'none';
 }
 
+function openCvSection() {
+    if (IS_MOBILE) {
+        openSectionDialog(sectionDialogs.CV);
+        return;
+    }
+    window.open(sectionPages.CV, 'CV', 'width=480,height=680,scrollbars=yes,resizable=yes');
+}
+
 function handleBackButtonClick(index) {
     const label = backButtons[index];
 
@@ -1937,14 +1945,15 @@ function handleBackButtonClick(index) {
         return;
     }
 
+    if (label === 'CV') {
+        openCvSection();
+        return;
+    }
+
     if (IS_MOBILE) {
         openSectionDialog(sectionDialogs[label]);
     } else {
-        const url = sectionPages[label];
-        const specs = label === 'CV'
-            ? 'width=480,height=680,scrollbars=yes,resizable=yes'
-            : 'width=700,height=600,scrollbars=yes,resizable=yes';
-        window.open(url, label, specs);
+        window.open(sectionPages[label], label, 'width=700,height=600,scrollbars=yes,resizable=yes');
     }
 }
 
