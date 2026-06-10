@@ -20,7 +20,7 @@
     <meta property="og:type" content="website">
     
     <!-- Icons -->
-    <link rel="icon" type="image/png" href="/icon-192.png">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="apple-touch-icon" href="/icon-192.png">
     
     <!-- Manifest -->
@@ -38,6 +38,32 @@
             <span class="wallet-pass-label">Add to Wallet</span>
         </button>
     </div>
+    <!-- Section dialogs (mobile fallback / shared markup) -->
+    <dialog id="dialog-info" class="section-dialog popup-window" style="--popup-w: 700px; --popup-h: 600px;">
+        <div class="popup-titlebar">
+            <span class="popup-title">Info</span>
+            <button class="dialog-close" aria-label="Close">&times;</button>
+        </div>
+        <iframe class="popup-frame" data-src="/info.html" title="Info"></iframe>
+    </dialog>
+
+    <dialog id="dialog-projects" class="section-dialog">
+        <button class="dialog-close" aria-label="Close">&times;</button>
+        <div class="dialog-content">
+            <h2>Projects</h2>
+            <p>Coming soon.</p>
+        </div>
+    </dialog>
+
+    <dialog id="dialog-cv" class="section-dialog popup-window" style="--popup-w: 480px; --popup-h: 680px;">
+        <div class="popup-titlebar">
+            <span class="popup-title">CV</span>
+            <a class="popup-action" href="/CV_2026_5.pdf" download="CV_2026_5.pdf" title="Download PDF">&#8595;</a>
+            <button class="dialog-close" aria-label="Close">&times;</button>
+        </div>
+        <iframe class="popup-frame" data-src="/cv.html" title="CV"></iframe>
+    </dialog>
+
     <script type="module" src="script.js"></script>
 </body>
 </html>

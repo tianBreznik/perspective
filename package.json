@@ -11,7 +11,8 @@
     "create-pkpass": "node create-pkpass.js",
     "create-pkpass-signed": "node create-pkpass-signed.js",
     "wallet-pass": "npm run generate-wallet-pass && npm run create-pkpass",
-    "wallet-pass-signed": "npm run generate-wallet-pass && npm run create-pkpass-signed"
+    "wallet-pass-signed": "npm run generate-wallet-pass && npm run create-pkpass-signed",
+    "bake-project-textures": "node scripts/bake-project-textures.mjs"
   },
   "dependencies": {
     "three": "^0.161.0"
@@ -19,6 +20,8 @@
   "devDependencies": {
     "archiver": "^7.0.1",
     "passkit-generator": "^3.5.7",
+    "playwright": "^1.49.0",
+    "pngjs": "^7.0.0",
     "typescript": "^5.5.3",
     "vite": "^5.0.0"
   },
