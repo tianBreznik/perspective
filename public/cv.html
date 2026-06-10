@@ -51,7 +51,7 @@
         const pdfjsLib = await import(`${CDN}/build/pdf.min.mjs`);
         pdfjsLib.GlobalWorkerOptions.workerSrc = `${CDN}/build/pdf.worker.min.mjs`;
 
-        const PDF_URL = new URL('/CV_2026_5.pdf', window.location.href).href;
+        const PDF_URL = new URL('/CV_Tian_2026.pdf', window.location.href).href;
         const viewport = document.getElementById('cv-viewport');
         const zoomLayer = document.getElementById('cv-zoom-layer');
         const pages = document.getElementById('cv-pages');
