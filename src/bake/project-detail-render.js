@@ -11,15 +11,13 @@ export const BACK_LINK_LABEL = 'back';
 export const BACK_LINK_SIZE = 0.13 * 0.82;
 export const PROJECT_INDEX_SIZE = 0.13 * 0.82;
 
-export const PROJECT_FRAME_W = 2.9;
-export const PROJECT_FRAME_H = 1.55;
-export const PROJECT_FRAME_Y = 0.18;
-export const PROJECT_FRAME_BORDER = 0.012;
 export const PROJECT_DETAIL_TITLE_SIZE = PROJECT_INDEX_SIZE;
-export const PROJECT_DETAIL_TITLE_GAP = 0.07;
-export const PROJECT_DETAIL_DESC_SIZE = 0.13 * 0.6;
-export const PROJECT_DETAIL_DESC_MAX_W = 3.3;
-export const PROJECT_DETAIL_DESC_LINE_GAP = 0.07;
+export const PROJECT_DETAIL_TOP_MARGIN = 0.2;
+export const PROJECT_DETAIL_TITLE_DESC_GAP = 0.14;
+export const PROJECT_DETAIL_DESC_SIZE = 0.13 * 0.62;
+export const PROJECT_DETAIL_DESC_MAX_W = CARD_WIDTH - 0.36;
+export const PROJECT_DETAIL_DESC_LINE_GAP = 0.065;
+export const PROJECT_DETAIL_DESC_BOTTOM_MARGIN = 0.22;
 export const PROJECT_INDEX_GAP = 0.24;
 
 export function measureTextLabel(text, size, font, curveSegments = BAKE_CURVE_SEGMENTS) {
@@ -50,24 +48,27 @@ export function wrapTextLines(text, size, maxW, font, curveSegments) {
 
 export function getProjectDetailTitleLayout(item, font, curveSegments) {
     const metrics = measureTextLabel(item.title, PROJECT_DETAIL_TITLE_SIZE, font, curveSegments);
-    const frameTop = PROJECT_FRAME_Y + PROJECT_FRAME_H / 2;
     return {
         ...metrics,
         x: -metrics.w / 2,
-        y: frameTop + PROJECT_DETAIL_TITLE_GAP,
+        y: CARD_HEIGHT / 2 - PROJECT_DETAIL_TOP_MARGIN - metrics.h,
     };
 }
 
 export function getProjectDetailDescriptionLayout(item, font, curveSegments) {
     if (!item.description) return null;
+    const titleLayout = getProjectDetailTitleLayout(item, font, curveSegments);
     const lines = wrapTextLines(item.description, PROJECT_DETAIL_DESC_SIZE, PROJECT_DETAIL_DESC_MAX_W, font, curveSegments);
-    let lineY = PROJECT_FRAME_Y - PROJECT_FRAME_H / 2 - 0.16 - PROJECT_DETAIL_DESC_SIZE;
-    const lineLayouts = lines.map((line) => {
+    const minLineBottom = -CARD_HEIGHT / 2 + PROJECT_DETAIL_DESC_BOTTOM_MARGIN;
+    let lineY = titleLayout.y - PROJECT_DETAIL_TITLE_DESC_GAP;
+    const lineLayouts = [];
+    for (const line of lines) {
         const m = measureTextLabel(line, PROJECT_DETAIL_DESC_SIZE, font, curveSegments);
-        const layout = { line, x: -m.w / 2, y: lineY, w: m.w, h: m.h };
-        lineY -= PROJECT_DETAIL_DESC_SIZE + PROJECT_DETAIL_DESC_LINE_GAP;
-        return layout;
-    });
+        lineY -= m.h;
+        if (lineY < minLineBottom) break;
+        lineLayouts.push({ line, x: -m.w / 2, y: lineY, w: m.w, h: m.h });
+        lineY -= PROJECT_DETAIL_DESC_LINE_GAP;
+    }
     if (lineLayouts.length === 0) return null;
     const minX = Math.min(...lineLayouts.map((l) => l.x));
     const maxX = Math.max(...lineLayouts.map((l) => l.x + l.w));
@@ -154,20 +155,6 @@ export function renderProjectDetailTarget(renderer, font, item, projectIndexLayo
 
     const titleLayout = getProjectDetailTitleLayout(item, font, curveSegments);
     addTextMesh(orthoScene, item.title, PROJECT_DETAIL_TITLE_SIZE, titleLayout.x, titleLayout.y, font, curveSegments, inkMat);
-
-    const frameTop = PROJECT_FRAME_Y + PROJECT_FRAME_H / 2;
-    const b = PROJECT_FRAME_BORDER;
-    const strips = [
-        { w: PROJECT_FRAME_W + 2 * b, h: b, x: 0, y: frameTop + b / 2 },
-        { w: PROJECT_FRAME_W + 2 * b, h: b, x: 0, y: PROJECT_FRAME_Y - PROJECT_FRAME_H / 2 - b / 2 },
-        { w: b, h: PROJECT_FRAME_H, x: -(PROJECT_FRAME_W + b) / 2, y: PROJECT_FRAME_Y },
-        { w: b, h: PROJECT_FRAME_H, x: (PROJECT_FRAME_W + b) / 2, y: PROJECT_FRAME_Y },
-    ];
-    for (const s of strips) {
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(s.w, s.h), inkMat);
-        mesh.position.set(s.x, s.y, 0);
-        orthoScene.add(mesh);
-    }
 
     const descLayout = getProjectDetailDescriptionLayout(item, font, curveSegments);
     if (descLayout) {

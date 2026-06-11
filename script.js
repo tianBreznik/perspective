@@ -39,7 +39,7 @@ const STICKER_DUST_STRIDE = IS_MOBILE ? 2 : 1;
 
 // Scene setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xffffff);
+scene.background = null;
 
 const camera = new THREE.PerspectiveCamera(
     75,
@@ -52,6 +52,8 @@ camera.position.z = 5;
 const renderer = new THREE.WebGLRenderer({
     canvas: document.getElementById('canvas'),
     antialias: true,
+    alpha: true,
+    preserveDrawingBuffer: true,
     powerPreference: 'high-performance',
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -455,16 +457,7 @@ const PROJECT_INDEX_GAP = 0.24;
 const BACK_LINK_LABEL = 'back';
 const BACK_LINK_SIZE = backButtonSize * 0.82;
 
-// Project detail view (engraved frame the live iframe sits inside)
-const PROJECT_FRAME_W = 2.9;
-const PROJECT_FRAME_H = 1.55; // taller than before — closer to a normal page aspect
-const PROJECT_FRAME_Y = 0.18;
-const PROJECT_FRAME_BORDER = 0.012;
-const PROJECT_DETAIL_TITLE_SIZE = PROJECT_INDEX_SIZE;
-const PROJECT_DETAIL_TITLE_GAP = 0.07; // space between title baseline and frame top
-const PROJECT_DETAIL_DESC_SIZE = backButtonSize * 0.6;
-const PROJECT_DETAIL_DESC_MAX_W = 3.3;
-const PROJECT_DETAIL_DESC_LINE_GAP = 0.07;
+// Project detail view — title + description on card back; live site fills the viewport behind the card.
 
 function measureTextLabel(text, size, typeface = backButtonFont) {
     const g = new TextGeometry(text, { font: typeface, size, height: 0.001, curveSegments: TEXT_CURVE_SEGMENTS, bevelEnabled: false });
@@ -800,8 +793,9 @@ function openProjectDetail(index) {
     activeProjectIndex = index;
     backFaceTextures.project = getProjectDetailTexture(index);
     activeProjectItem = item;
-    setProjectFrameContent(item, true);
+    commitProjectFrameContent(item);
     projectFrameMode = 'in';
+    projectFrameEl.style.visibility = 'visible';
     transitionBackFace('project');
 }
 
@@ -1449,6 +1443,8 @@ function updateHover() {
         }
         if (kind === 'projectIndex' && backVisible && isBackProjectsActive()) {
             hoveringProjectIndex = hit.object.userData.projectIndex;
+            const item = projectIndexItems[hoveringProjectIndex];
+            if (item?.url) prefetchProjectUrl(item.url);
         }
         if (kind === 'projectTitle' && backVisible && isBackProjectDetailActive()) {
             hoveringProjectTitle = true;
@@ -1475,49 +1471,121 @@ scene.add(ambientLight);
 
 // Rotation controls with damping
 let isDragging = false;
+let pointerDownPos = null;
+let dragClientPos = null;
 let previousMousePosition = { x: 0, y: 0 };
 let rotation = { x: 0, y: 0 };
 let velocity = { x: 0, y: 0 };
 const ROTATION_SENSITIVITY = 0.005;
 const DAMPING = 0.96;
+const DRAG_THRESHOLD_PX = 6;
+const CARD_MOTION_IFRAME_SUSPEND = 0.0008;
+
+function isCardMotionActive() {
+    return isDragging
+        || Math.abs(velocity.x) > CARD_MOTION_IFRAME_SUSPEND
+        || Math.abs(velocity.y) > CARD_MOTION_IFRAME_SUSPEND;
+}
+
+function setProjectFrameFrozen(frozen) {
+    projectFrameEl.classList.toggle('is-frozen', frozen);
+    if (frozen) {
+        projectFrameEl.setAttribute('inert', '');
+    } else {
+        projectFrameEl.removeAttribute('inert');
+    }
+}
+
+function updateProjectFramePerformance() {
+    if (!isProjectBackgroundActive()) {
+        setProjectFrameFrozen(false);
+        document.body.classList.remove('project-bg-active', 'card-motion-active');
+        if (renderer.getPixelRatio() !== MAX_DEVICE_PIXEL_RATIO) {
+            renderer.setPixelRatio(MAX_DEVICE_PIXEL_RATIO);
+        }
+        return;
+    }
+    document.body.classList.add('project-bg-active');
+    const motion = isCardMotionActive();
+    document.body.classList.toggle('card-motion-active', motion);
+    setProjectFrameFrozen(motion);
+    const motionDpr = IS_MOBILE ? 1 : Math.min(1.5, MAX_DEVICE_PIXEL_RATIO);
+    const targetDpr = motion ? motionDpr : Math.min(1.75, MAX_DEVICE_PIXEL_RATIO);
+    if (renderer.getPixelRatio() !== targetDpr) renderer.setPixelRatio(targetDpr);
+}
+
+function beginCardPointer(clientX, clientY, event) {
+    pointerDownPos = { x: clientX, y: clientY };
+    isDragging = false;
+    dragClientPos = null;
+    previousMousePosition = { x: clientX, y: clientY };
+    onPointerMove(event);
+}
+
+function endCardPointer(event) {
+    const wasClick = pointerDownPos && !isDragging;
+    if (wasClick) {
+        onPointerMove(event);
+        tryBackInteraction();
+    }
+    pointerDownPos = null;
+    dragClientPos = null;
+    isDragging = false;
+    updateProjectFramePerformance();
+}
+
+function moveCardPointer(clientX, clientY, event) {
+    onPointerMove(event);
+    if (!pointerDownPos) {
+        if (!isDragging) updateHover();
+        return;
+    }
+    const dx = clientX - pointerDownPos.x;
+    const dy = clientY - pointerDownPos.y;
+    if (!isDragging && (dx * dx + dy * dy) > DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
+        isDragging = true;
+        updateProjectFramePerformance();
+    }
+    if (!isDragging) {
+        updateHover();
+        return;
+    }
+    dragClientPos = { x: clientX, y: clientY };
+}
+
+function applyDragRotationStep() {
+    if (!isDragging || !dragClientPos || !card) return;
+    const deltaX = dragClientPos.x - previousMousePosition.x;
+    const deltaY = dragClientPos.y - previousMousePosition.y;
+    if (!deltaX && !deltaY) return;
+    const rotDx = deltaX * ROTATION_SENSITIVITY;
+    const rotDy = -deltaY * ROTATION_SENSITIVITY;
+    rotation.y += rotDx;
+    rotation.x += rotDy;
+    rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
+    velocity.y = rotDx;
+    velocity.x = rotDy;
+    previousMousePosition.x = dragClientPos.x;
+    previousMousePosition.y = dragClientPos.y;
+}
 
 document.addEventListener('mousedown', (e) => {
-    isDragging = true;
-    previousMousePosition = { x: e.clientX, y: e.clientY };
-    onPointerMove(e);
+    if (isProjectBackgroundActive() && !pointerHitsCard(e.clientX, e.clientY)) return;
+    beginCardPointer(e.clientX, e.clientY, e);
 });
 
 document.addEventListener('mousemove', (e) => {
-    onPointerMove(e);
-    if (!isDragging) updateHover();
-
-    if (isDragging && card) {
-        const deltaX = e.clientX - previousMousePosition.x;
-        const deltaY = e.clientY - previousMousePosition.y;
-        const dx = deltaX * ROTATION_SENSITIVITY;
-        const dy = -deltaY * ROTATION_SENSITIVITY;
-        rotation.y += dx;
-        rotation.x += dy;
-        rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
-        velocity.y = dx;
-        velocity.x = dy;
-        previousMousePosition = { x: e.clientX, y: e.clientY };
-    }
+    moveCardPointer(e.clientX, e.clientY, e);
 });
 
-document.addEventListener('mouseup', () => {
-    isDragging = false;
+document.addEventListener('mouseup', (e) => {
+    endCardPointer(e);
 });
 
 canvasEl.addEventListener('pointerleave', () => {
     pointer.x = -999;
     pointer.y = -999;
     updateHover();
-});
-
-document.addEventListener('click', (e) => {
-    onPointerMove(e);
-    tryBackInteraction();
 });
 
 function openProjectExternalLink(item) {
@@ -1529,6 +1597,72 @@ function openProjectExternalLink(item) {
 function openProjectWriteUp(item) {
     if (!item?.writeUpUrl) return;
     window.open(item.writeUpUrl, '_blank', 'noopener,noreferrer');
+}
+
+function tryBackProjectDetailLayoutTap(hits) {
+    if (!activeProjectItem) return false;
+    const layout = getBackFaceLayoutFromHits(hits);
+    if (!layout) return false;
+    const pad = BACK_HOME_HIT_PAD;
+
+    const backLink = projectIndexLayout.backLink;
+    if (layout.x >= backLink.x - pad && layout.x <= backLink.x + backLink.w + pad
+        && layout.y >= backLink.y - pad && layout.y <= backLink.y + backLink.h + pad) {
+        backLinkHoverUniform.value = 1;
+        setTimeout(() => { backLinkHoverUniform.value = 0; }, 250);
+        closeProjectDetail();
+        return true;
+    }
+
+    const titleLayout = getProjectDetailTitleLayout(activeProjectItem);
+    if (layout.x >= titleLayout.x - pad && layout.x <= titleLayout.x + titleLayout.w + pad
+        && layout.y >= titleLayout.y - pad && layout.y <= titleLayout.y + titleLayout.h + pad) {
+        projectDetailTitleHoverUniforms[activeProjectIndex].value = 1;
+        setTimeout(() => { projectDetailTitleHoverUniforms[activeProjectIndex].value = 0; }, 250);
+        openProjectExternalLink(activeProjectItem);
+        return true;
+    }
+
+    const descLayout = getProjectDetailDescriptionLayout(activeProjectItem);
+    if (descLayout && activeProjectItem.writeUpUrl) {
+        for (const line of descLayout.lines) {
+            if (layout.x >= line.x - pad && layout.x <= line.x + line.w + pad
+                && layout.y >= line.y - pad && layout.y <= line.y + line.h + pad) {
+                projectDetailWriteUpHoverUniforms[activeProjectIndex].value = 1;
+                setTimeout(() => { projectDetailWriteUpHoverUniforms[activeProjectIndex].value = 0; }, 250);
+                openProjectWriteUp(activeProjectItem);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+function tryBackProjectsLayoutTap(hits) {
+    const layout = getBackFaceLayoutFromHits(hits);
+    if (!layout) return false;
+    const pad = BACK_HOME_HIT_PAD;
+
+    const backLink = projectIndexLayout.backLink;
+    if (layout.x >= backLink.x - pad && layout.x <= backLink.x + backLink.w + pad
+        && layout.y >= backLink.y - pad && layout.y <= backLink.y + backLink.h + pad) {
+        backLinkHoverUniform.value = 1;
+        setTimeout(() => { backLinkHoverUniform.value = 0; }, 250);
+        closeBackProjectsIndex();
+        return true;
+    }
+
+    for (let i = 0; i < projectIndexLayout.entries.length; i++) {
+        const entry = projectIndexLayout.entries[i];
+        if (layout.x >= entry.x - pad && layout.x <= entry.x + entry.w + pad
+            && layout.y >= entry.y - pad && layout.y <= entry.y + entry.h + pad) {
+            projectIndexHoverUniforms[i].value = 1;
+            setTimeout(() => { projectIndexHoverUniforms[i].value = 0; }, 250);
+            handleProjectIndexClick(i);
+            return true;
+        }
+    }
+    return false;
 }
 
 function tryBackInteraction() {
@@ -1582,6 +1716,7 @@ function tryBackInteraction() {
             closeProjectDetail();
             return true;
         }
+        if (tryBackProjectDetailLayoutTap(hits)) return true;
         return false;
     }
 
@@ -1602,6 +1737,7 @@ function tryBackInteraction() {
             handleProjectIndexClick(idx);
             return true;
         }
+        if (tryBackProjectsLayoutTap(hits)) return true;
         return false;
     }
 
@@ -1646,51 +1782,138 @@ document.querySelectorAll('.section-dialog').forEach(dialog => {
     });
 });
 
-// Live project iframe, perspective-mapped onto the engraved frame on the card back.
-// Always render at desktop viewport width so embedded sites serve their desktop layout;
-// scale down uniformly to fit the physical frame (mobile included).
-const PROJECT_FRAME_PX_W = IS_MOBILE ? 640 : 800;
-const PROJECT_FRAME_PX_H = Math.round(PROJECT_FRAME_PX_W * (PROJECT_FRAME_H / PROJECT_FRAME_W));
-const IFRAME_VIEWPORT_W = 1280;
-const IFRAME_VIEWPORT_H = 720;
+// Live project iframe — full viewport behind the 3D card (not on the card back).
+const IFRAME_DESKTOP_W = 1280;
+const IFRAME_DESKTOP_H = 720;
+
+function useMobileProjectFrameLayout() {
+    return IS_MOBILE || window.innerWidth <= 768;
+}
 
 const projectFrameEl = document.createElement('div');
 projectFrameEl.id = 'project-frame';
-projectFrameEl.style.width = PROJECT_FRAME_PX_W + 'px';
-projectFrameEl.style.height = PROJECT_FRAME_PX_H + 'px';
-projectFrameEl.style.visibility = 'hidden';
-projectFrameEl.style.maskSize = '100% 100%';
-projectFrameEl.style.webkitMaskSize = '100% 100%';
-projectFrameEl.style.maskRepeat = 'no-repeat';
-projectFrameEl.style.webkitMaskRepeat = 'no-repeat';
 const projectFrameContent = document.createElement('div');
 projectFrameContent.className = 'project-frame-content';
 const projectFrameIframe = document.createElement('iframe');
 projectFrameIframe.title = 'Project preview';
-projectFrameIframe.setAttribute('width', String(IFRAME_VIEWPORT_W));
-projectFrameIframe.setAttribute('height', String(IFRAME_VIEWPORT_H));
+projectFrameIframe.setAttribute('loading', 'eager');
 projectFrameContent.appendChild(projectFrameIframe);
 const projectFrameImg = document.createElement('img');
 projectFrameImg.alt = 'Project preview';
 projectFrameImg.style.display = 'none';
 projectFrameContent.appendChild(projectFrameImg);
 projectFrameEl.appendChild(projectFrameContent);
-document.body.appendChild(projectFrameEl);
+const projectFrameFreezeShield = document.createElement('div');
+projectFrameFreezeShield.className = 'project-frame-freeze-shield';
+projectFrameFreezeShield.setAttribute('aria-hidden', 'true');
+projectFrameEl.appendChild(projectFrameFreezeShield);
+document.body.insertBefore(projectFrameEl, document.getElementById('canvas'));
 let projectFrameMode = null; // 'in' | 'out' | null
 
+const cardPointerCapture = document.createElement('div');
+cardPointerCapture.id = 'card-pointer-capture';
+cardPointerCapture.style.cssText = 'position:fixed;inset:0;z-index:2;pointer-events:none;';
+document.body.appendChild(cardPointerCapture);
+
+const _cardCaptureCorner = new THREE.Vector3();
+const _cardCaptureScreen = [[0, 0], [0, 0], [0, 0], [0, 0]];
+
+function updateCardPointerCapture() {
+    if (!isProjectBackgroundActive() || !card) {
+        cardPointerCapture.style.pointerEvents = 'none';
+        cardPointerCapture.style.clipPath = 'none';
+        return;
+    }
+    const localCorners = [
+        [-cardWidth / 2, cardHeight / 2],
+        [cardWidth / 2, cardHeight / 2],
+        [cardWidth / 2, -cardHeight / 2],
+        [-cardWidth / 2, -cardHeight / 2],
+    ];
+    for (let i = 0; i < 4; i++) {
+        _cardCaptureCorner.set(localCorners[i][0], localCorners[i][1], 0);
+        card.localToWorld(_cardCaptureCorner);
+        _cardCaptureCorner.project(camera);
+        const screen = ndcToClientScreen(_cardCaptureCorner.x, _cardCaptureCorner.y);
+        _cardCaptureScreen[i][0] = screen[0];
+        _cardCaptureScreen[i][1] = screen[1];
+    }
+    const poly = _cardCaptureScreen.map((c) => `${c[0]}px ${c[1]}px`).join(', ');
+    cardPointerCapture.style.clipPath = `polygon(${poly})`;
+    cardPointerCapture.style.pointerEvents = backInkProgress.value > 0.15 ? 'auto' : 'none';
+}
+
+const projectPrefetchIframe = document.createElement('iframe');
+projectPrefetchIframe.setAttribute('aria-hidden', 'true');
+projectPrefetchIframe.setAttribute('tabindex', '-1');
+projectPrefetchIframe.style.cssText = 'position:fixed;width:0;height:0;border:0;opacity:0;pointer-events:none';
+document.body.appendChild(projectPrefetchIframe);
+let prefetchedProjectUrl = null;
+
+function prefetchProjectUrl(url) {
+    if (!url || url === prefetchedProjectUrl || projectFrameIframe.getAttribute('src') === url) return;
+    prefetchedProjectUrl = url;
+    projectPrefetchIframe.src = url;
+}
+
+function isProjectBackgroundActive() {
+    return projectFrameMode === 'in' && !!activeProjectItem?.url && !activeProjectItem?.image;
+}
+
+function pointerHitsCard(clientX, clientY) {
+    if (!card) return false;
+    const { ndcX, ndcY } = clientToCanvasNdc(clientX, clientY);
+    _pointerHitNdc.set(ndcX, ndcY);
+    raycaster.setFromCamera(_pointerHitNdc, camera);
+    return raycaster.intersectObject(card, true).length > 0;
+}
+
+function updateProjectPointerRouting() {
+    if (!isProjectBackgroundActive()) {
+        canvasEl.style.pointerEvents = '';
+        projectFrameEl.style.pointerEvents = 'none';
+        updateCardPointerCapture();
+        return;
+    }
+    canvasEl.style.pointerEvents = 'none';
+    const iframeInteractive = backInkProgress.value > 0.15 && !projectFrameEl.classList.contains('is-frozen');
+    projectFrameEl.style.pointerEvents = iframeInteractive ? 'auto' : 'none';
+    updateCardPointerCapture();
+}
+
+const _pointerHitNdc = new THREE.Vector2();
+
+function setProjectFrameMediaSize(w, h) {
+    projectFrameContent.style.width = w + 'px';
+    projectFrameContent.style.height = h + 'px';
+    projectFrameIframe.style.width = w + 'px';
+    projectFrameIframe.style.height = h + 'px';
+    projectFrameIframe.setAttribute('width', String(Math.round(w)));
+    projectFrameIframe.setAttribute('height', String(Math.round(h)));
+    projectFrameImg.style.width = w + 'px';
+    projectFrameImg.style.height = h + 'px';
+}
+
 function applyProjectFrameViewport() {
-    const scale = PROJECT_FRAME_PX_W / IFRAME_VIEWPORT_W;
-    const scaledH = IFRAME_VIEWPORT_H * scale;
-    const top = scaledH < PROJECT_FRAME_PX_H ? (PROJECT_FRAME_PX_H - scaledH) / 2 : 0;
-    projectFrameContent.style.transform = `translateY(${top}px) scale(${scale})`;
-    projectFrameContent.style.width = IFRAME_VIEWPORT_W + 'px';
-    projectFrameContent.style.height = IFRAME_VIEWPORT_H + 'px';
-    projectFrameIframe.style.width = IFRAME_VIEWPORT_W + 'px';
-    projectFrameIframe.style.height = IFRAME_VIEWPORT_H + 'px';
-    projectFrameImg.style.width = IFRAME_VIEWPORT_W + 'px';
-    projectFrameImg.style.height = IFRAME_VIEWPORT_H + 'px';
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    if (useMobileProjectFrameLayout()) {
+        projectFrameContent.style.transform = 'none';
+        setProjectFrameMediaSize(vw, vh);
+        return;
+    }
+
+    const scale = Math.max(vw / IFRAME_DESKTOP_W, vh / IFRAME_DESKTOP_H);
+    const scaledW = IFRAME_DESKTOP_W * scale;
+    const scaledH = IFRAME_DESKTOP_H * scale;
+    const left = (vw - scaledW) / 2;
+    const top = (vh - scaledH) / 2;
+    projectFrameContent.style.transform = `translate(${left}px, ${top}px) scale(${scale})`;
+    setProjectFrameMediaSize(IFRAME_DESKTOP_W, IFRAME_DESKTOP_H);
 }
 applyProjectFrameViewport();
+window.addEventListener('resize', applyProjectFrameViewport);
 
 let pendingProjectFrameItem = null;
 let loadedProjectFrameKey = null;
@@ -1714,172 +1937,15 @@ function commitProjectFrameContent(item) {
     }
 }
 
-function setProjectFrameContent(item, defer = false) {
+function setProjectFrameContent(item) {
     pendingProjectFrameItem = item;
-    if (defer) {
-        loadedProjectFrameKey = null;
-        projectFrameIframe.removeAttribute('src');
-        projectFrameImg.removeAttribute('src');
-        return;
-    }
     commitProjectFrameContent(item);
 }
 
-const FRAME_MASK_W = 174;
-const FRAME_MASK_H = Math.round(FRAME_MASK_W * (PROJECT_FRAME_H / PROJECT_FRAME_W));
-let frameMaskGrain = null;
-let frameMaskCanvas = null;
-let frameMaskCtx = null;
-let frameMaskImageData = null;
-let frameMaskObjectUrl = null;
-
-function inkHashJS(x, y) {
-    const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-    return s - Math.floor(s);
-}
-
-function inkNoiseJS(x, y) {
-    const xi = Math.floor(x), yi = Math.floor(y);
-    const fx = x - xi, fy = y - yi;
-    const a = inkHashJS(xi, yi);
-    const b = inkHashJS(xi + 1, yi);
-    const c = inkHashJS(xi, yi + 1);
-    const d = inkHashJS(xi + 1, yi + 1);
-    const ux = fx * fx * (3 - 2 * fx);
-    const uy = fy * fy * (3 - 2 * fy);
-    return (a * (1 - ux) + b * ux) * (1 - uy) + (c * (1 - ux) + d * ux) * uy;
-}
-
-function inkGrainJS(x, y) {
-    let v = 0, amp = 0.55;
-    for (let i = 0; i < 3; i++) {
-        v += amp * inkNoiseJS(x, y);
-        x *= 2.05;
-        y *= 2.05;
-        amp *= 0.5;
-    }
-    return v;
-}
-
-function smoothstepJS(e0, e1, x) {
-    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-    return t * t * (3 - 2 * t);
-}
-
-function ensureFrameMask() {
-    if (frameMaskGrain) return;
-    frameMaskGrain = new Float32Array(FRAME_MASK_W * FRAME_MASK_H);
-    const yT = PROJECT_FRAME_Y + PROJECT_FRAME_H / 2;
-    for (let py = 0; py < FRAME_MASK_H; py++) {
-        for (let px = 0; px < FRAME_MASK_W; px++) {
-            const lx = -PROJECT_FRAME_W / 2 + ((px + 0.5) / FRAME_MASK_W) * PROJECT_FRAME_W;
-            const ly = yT - ((py + 0.5) / FRAME_MASK_H) * PROJECT_FRAME_H;
-            const u = (lx + cardWidth / 2) / cardWidth;
-            const v = (ly + cardHeight / 2) / cardHeight;
-            frameMaskGrain[py * FRAME_MASK_W + px] = inkGrainJS(u * 14, v * 14);
-        }
-    }
-    frameMaskCanvas = document.createElement('canvas');
-    frameMaskCanvas.width = FRAME_MASK_W;
-    frameMaskCanvas.height = FRAME_MASK_H;
-    frameMaskCtx = frameMaskCanvas.getContext('2d');
-    frameMaskImageData = frameMaskCtx.createImageData(FRAME_MASK_W, FRAME_MASK_H);
-    const data = frameMaskImageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-        data[i] = 255;
-        data[i + 1] = 255;
-        data[i + 2] = 255;
-    }
-}
-
-function applyFrameMask(progress, invert) {
-    ensureFrameMask();
-    const data = frameMaskImageData.data;
-    for (let i = 0; i < frameMaskGrain.length; i++) {
-        const d = progress < 0.001 ? 0 : (progress > 0.999 ? 1 : 1 - smoothstepJS(progress - 0.12, progress + 0.06, frameMaskGrain[i]));
-        const a = invert ? 1 - d : d;
-        data[i * 4 + 3] = a * 255;
-    }
-    frameMaskCtx.putImageData(frameMaskImageData, 0, 0);
-    frameMaskCanvas.toBlob((blob) => {
-        if (!blob) return;
-        if (frameMaskObjectUrl) URL.revokeObjectURL(frameMaskObjectUrl);
-        frameMaskObjectUrl = URL.createObjectURL(blob);
-        projectFrameEl.style.maskImage = `url(${frameMaskObjectUrl})`;
-        projectFrameEl.style.webkitMaskImage = `url(${frameMaskObjectUrl})`;
-    });
-}
-
-function clearFrameMask() {
-    projectFrameEl.style.maskImage = 'none';
-    projectFrameEl.style.webkitMaskImage = 'none';
-}
-
-function mat3Adjugate(m) {
-    return [
-        m[4] * m[8] - m[5] * m[7], m[2] * m[7] - m[1] * m[8], m[1] * m[5] - m[2] * m[4],
-        m[5] * m[6] - m[3] * m[8], m[0] * m[8] - m[2] * m[6], m[2] * m[3] - m[0] * m[5],
-        m[3] * m[7] - m[4] * m[6], m[1] * m[6] - m[0] * m[7], m[0] * m[4] - m[1] * m[3],
-    ];
-}
-
-function mat3Multiply(a, b) {
-    const c = new Array(9);
-    for (let i = 0; i < 3; i++) {
-        for (let j = 0; j < 3; j++) {
-            c[3 * i + j] = a[3 * i] * b[j] + a[3 * i + 1] * b[3 + j] + a[3 * i + 2] * b[6 + j];
-        }
-    }
-    return c;
-}
-
-function mat3MultiplyVector(m, v) {
-    return [
-        m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
-        m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
-        m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
-    ];
-}
-
-function basisToPoints(x1, y1, x2, y2, x3, y3, x4, y4) {
-    const m = [x1, x2, x3, y1, y2, y3, 1, 1, 1];
-    const v = mat3MultiplyVector(mat3Adjugate(m), [x4, y4, 1]);
-    return mat3Multiply(m, [v[0], 0, 0, 0, v[1], 0, 0, 0, v[2]]);
-}
-
-// Homography mapping the element's (0,0)-(w,h) rect to four projected screen corners.
-function projectFrameTransform(corners) {
-    const w = PROJECT_FRAME_PX_W;
-    const h = PROJECT_FRAME_PX_H;
-    const src = basisToPoints(0, 0, w, 0, 0, h, w, h);
-    const dst = basisToPoints(
-        corners[0][0], corners[0][1],
-        corners[1][0], corners[1][1],
-        corners[2][0], corners[2][1],
-        corners[3][0], corners[3][1]
-    );
-    const t = mat3Multiply(dst, mat3Adjugate(src));
-    for (let i = 0; i < 9; i++) t[i] /= t[8];
-    return `matrix3d(${t[0]},${t[3]},0,${t[6]},${t[1]},${t[4]},0,${t[7]},0,0,1,0,${t[2]},${t[5]},0,${t[8]})`;
-}
-
-const _frameCornerVec = new THREE.Vector3();
-function projectCardBackPoint(layoutX, layoutY, out) {
-    // Back-face layout x is mirrored in card-local space (same as the hover planes)
-    _frameCornerVec.set(-layoutX, layoutY, -cardDepth / 2 - 0.005);
-    card.localToWorld(_frameCornerVec);
-    _frameCornerVec.project(camera);
-    const screen = ndcToClientScreen(_frameCornerVec.x, _frameCornerVec.y);
-    out[0] = screen[0];
-    out[1] = screen[1];
-}
-
-const _frameCorners = [[0, 0], [0, 0], [0, 0], [0, 0]];
-
 function hideProjectFrame() {
     projectFrameEl.style.opacity = '0';
-    projectFrameEl.style.pointerEvents = 'none';
     projectFrameEl.style.visibility = 'hidden';
+    updateProjectPointerRouting();
 }
 
 function updateProjectFrameOverlay() {
@@ -1888,45 +1954,21 @@ function updateProjectFrameOverlay() {
         return;
     }
 
-    const { backVisible } = getCardFaceVisibility();
-    if (!backVisible) {
-        hideProjectFrame();
-        return;
-    }
-
     const p = backInkProgress.value;
     if (projectFrameMode === 'in') {
-        if (p > 0.999) {
-            clearFrameMask();
-            if (pendingProjectFrameItem) commitProjectFrameContent(pendingProjectFrameItem);
-        } else {
-            applyFrameMask(p, false);
-        }
+        projectFrameEl.style.visibility = 'visible';
+        projectFrameEl.style.opacity = String(Math.min(1, p));
     } else {
         if (p > 0.999) {
             projectFrameMode = null;
             pendingProjectFrameItem = null;
-            loadedProjectFrameKey = null;
             hideProjectFrame();
             return;
         }
-        applyFrameMask(p, true);
+        projectFrameEl.style.visibility = 'visible';
+        projectFrameEl.style.opacity = String(Math.max(0, 1 - p));
     }
-
-    const xL = -PROJECT_FRAME_W / 2;
-    const xR = PROJECT_FRAME_W / 2;
-    const yT = PROJECT_FRAME_Y + PROJECT_FRAME_H / 2;
-    const yB = PROJECT_FRAME_Y - PROJECT_FRAME_H / 2;
-    projectCardBackPoint(xL, yT, _frameCorners[0]);
-    projectCardBackPoint(xR, yT, _frameCorners[1]);
-    projectCardBackPoint(xL, yB, _frameCorners[2]);
-    projectCardBackPoint(xR, yB, _frameCorners[3]);
-
-    projectFrameEl.style.visibility = 'visible';
-    projectFrameEl.style.transform = projectFrameTransform(_frameCorners);
-    projectFrameEl.style.opacity = '1';
-    const interactive = projectFrameMode === 'in' && p > 0.98 && !!activeProjectItem.url;
-    projectFrameEl.style.pointerEvents = interactive ? 'auto' : 'none';
+    updateProjectPointerRouting();
 }
 
 function openCvSection() {
@@ -1958,65 +2000,45 @@ function handleBackButtonClick(index) {
 }
 
 let touchStart = { x: 0, y: 0 };
-let touchOrigin = { x: 0, y: 0 };
-let touchStartTime = 0;
-const TOUCH_TAP_SLOP_PX = IS_MOBILE ? 44 : 30;
 
-canvasEl.addEventListener('touchstart', (e) => {
+function handleTouchStart(e) {
     const touch = e.touches[0];
     if (!touch) return;
-    touchStartTime = performance.now();
-    isDragging = false;
-    onPointerMove(touch);
-    touchOrigin = { x: touch.clientX, y: touch.clientY };
+    if (isProjectBackgroundActive() && !pointerHitsCard(touch.clientX, touch.clientY)) return;
+
+    beginCardPointer(touch.clientX, touch.clientY, touch);
     touchStart = { x: touch.clientX, y: touch.clientY };
-}, { passive: true });
+}
 
-canvasEl.addEventListener('touchmove', (e) => {
+function handleTouchMove(e) {
     const touch = e.touches[0];
     if (!touch) return;
-    const moveX = touch.clientX - touchStart.x;
-    const moveY = touch.clientY - touchStart.y;
-    const distSq = moveX * moveX + moveY * moveY;
-    if (distSq > 100) isDragging = true;
-
-    onPointerMove(touch);
-    if (!isDragging) {
-        updateHover();
+    if (isProjectBackgroundActive() && !pointerDownPos && !pointerHitsCard(touch.clientX, touch.clientY)) {
         return;
     }
 
-    if (card) {
-        e.preventDefault();
-        const dx = moveX * ROTATION_SENSITIVITY;
-        const dy = -moveY * ROTATION_SENSITIVITY;
-        rotation.y += dx;
-        rotation.x += dy;
-        rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
-        velocity.y = dx;
-        velocity.x = dy;
+    if (isDragging && card) e.preventDefault();
+    moveCardPointer(touch.clientX, touch.clientY, touch);
+    if (isDragging && card) {
         touchStart = { x: touch.clientX, y: touch.clientY };
     }
-}, { passive: false });
+}
 
-canvasEl.addEventListener('touchend', (e) => {
+function handleTouchEnd(e) {
     const touch = e.changedTouches[0];
     if (!touch) return;
-    const dt = performance.now() - touchStartTime;
-    const dx = touch.clientX - touchOrigin.x;
-    const dy = touch.clientY - touchOrigin.y;
-    const wasTap = (dx * dx + dy * dy) < TOUCH_TAP_SLOP_PX * TOUCH_TAP_SLOP_PX && dt < 450;
 
     onPointerMove(touch);
-    if (wasTap && tryBackInteraction()) {
-        e.preventDefault();
-    }
-
-    isDragging = false;
+    endCardPointer(touch);
     pointer.x = -999;
     pointer.y = -999;
     updateHover();
-}, { passive: false });
+}
+
+document.addEventListener('touchstart', handleTouchStart, { passive: true });
+document.addEventListener('touchmove', handleTouchMove, { passive: false });
+document.addEventListener('touchend', handleTouchEnd, { passive: false });
+document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
 function onViewportResize() {
     const w = window.innerWidth;
@@ -2302,10 +2324,13 @@ function clamp(v, min, max) {
     return v < min ? min : (v > max ? max : v);
 }
 
-function sampleChannel(src, w, h, x, y, channel) {
+function sampleChannelOverWhite(src, w, h, x, y, channel, bg = 255) {
     const sx = clamp(x | 0, 0, w - 1);
     const sy = clamp(y | 0, 0, h - 1);
-    return src[(sy * w + sx) * 4 + channel];
+    const i = (sy * w + sx) * 4;
+    const a = src[i + 3] / 255;
+    const c = src[i + channel];
+    return c * a + bg * (1 - a);
 }
 
 function renderWalletButtonRefraction(timeSec) {
@@ -2313,7 +2338,7 @@ function renderWalletButtonRefraction(timeSec) {
     const rect = walletGlassButton.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
+    const dpr = renderer.getPixelRatio();
     const w = Math.max(2, Math.round(rect.width * dpr));
     const h = Math.max(2, Math.round(rect.height * dpr));
     if (walletGlassCanvas.width !== w || walletGlassCanvas.height !== h) {
@@ -2335,6 +2360,10 @@ function renderWalletButtonRefraction(timeSec) {
     const sh = rect.height * srcScaleY;
 
     walletGlassSrcCtx.clearRect(0, 0, w, h);
+    // WebGL canvas is transparent outside the card — underpaint white so refraction
+    // doesn't sample black (matches the page when no iframe is visible behind the button).
+    walletGlassSrcCtx.fillStyle = '#ffffff';
+    walletGlassSrcCtx.fillRect(0, 0, w, h);
     walletGlassSrcCtx.drawImage(renderer.domElement, sx, sy, sw, sh, 0, 0, w, h);
 
     // Draw button label into the source layer so it sits "behind" glass and gets refracted.
@@ -2385,9 +2414,9 @@ function renderWalletButtonRefraction(timeSec) {
             const bx = x + dx - chroma;
             const syy = y + dy;
 
-            let r = sampleChannel(src, w, h, rx, syy, 0);
-            let g = sampleChannel(src, w, h, gx, syy, 1);
-            let b = sampleChannel(src, w, h, bx, syy, 2);
+            let r = sampleChannelOverWhite(src, w, h, rx, syy, 0);
+            let g = sampleChannelOverWhite(src, w, h, gx, syy, 1);
+            let b = sampleChannelOverWhite(src, w, h, bx, syy, 2);
 
             // Fresnel-like brightening near edges to sell curved glass
             const fres = Math.pow(edge, 1.6) * 42;
@@ -2430,41 +2459,45 @@ function animate() {
         initCard();
     }
     if (card) {
-        const target = isHovering ? 1 : 0;
-        hoverUniform.value += (target - hoverUniform.value) * HOVER_LERP;
+        applyDragRotationStep();
+        updateProjectFramePerformance();
 
-        const emailTarget = isHoveringEmail ? 1 : 0;
-        backHoverUniform.value += (emailTarget - backHoverUniform.value) * HOVER_LERP;
+        if (!isDragging) {
+            const target = isHovering ? 1 : 0;
+            hoverUniform.value += (target - hoverUniform.value) * HOVER_LERP;
 
-        // Back nav button hover lerp
-        for (let bi = 0; bi < backButtonHoverUniforms.length; bi++) {
-            const btnTarget = (hoveringBackButton === bi) ? 1 : 0;
-            const u = backButtonHoverUniforms[bi];
-            u.value += (btnTarget - u.value) * HOVER_LERP;
-        }
+            const emailTarget = isHoveringEmail ? 1 : 0;
+            backHoverUniform.value += (emailTarget - backHoverUniform.value) * HOVER_LERP;
 
-        for (let pi = 0; pi < projectIndexHoverUniforms.length; pi++) {
-            const projTarget = hoveringProjectIndex === pi ? 1 : 0;
-            const u = projectIndexHoverUniforms[pi];
-            u.value += (projTarget - u.value) * HOVER_LERP;
+            for (let bi = 0; bi < backButtonHoverUniforms.length; bi++) {
+                const btnTarget = (hoveringBackButton === bi) ? 1 : 0;
+                const u = backButtonHoverUniforms[bi];
+                u.value += (btnTarget - u.value) * HOVER_LERP;
+            }
+
+            for (let pi = 0; pi < projectIndexHoverUniforms.length; pi++) {
+                const projTarget = hoveringProjectIndex === pi ? 1 : 0;
+                const u = projectIndexHoverUniforms[pi];
+                u.value += (projTarget - u.value) * HOVER_LERP;
+            }
+            for (let ti = 0; ti < projectDetailTitleHoverUniforms.length; ti++) {
+                const titleTarget = hoveringProjectTitle && ti === activeProjectIndex ? 1 : 0;
+                const u = projectDetailTitleHoverUniforms[ti];
+                u.value += (titleTarget - u.value) * HOVER_LERP;
+            }
+            for (let wi = 0; wi < projectDetailWriteUpHoverUniforms.length; wi++) {
+                const writeUpTarget = hoveringProjectWriteUp && wi === activeProjectIndex ? 1 : 0;
+                const u = projectDetailWriteUpHoverUniforms[wi];
+                u.value += (writeUpTarget - u.value) * HOVER_LERP;
+            }
+            const backLinkTarget = hoveringBackLink ? 1 : 0;
+            backLinkHoverUniform.value += (backLinkTarget - backLinkHoverUniform.value) * HOVER_LERP;
         }
-        for (let ti = 0; ti < projectDetailTitleHoverUniforms.length; ti++) {
-            const titleTarget = hoveringProjectTitle && ti === activeProjectIndex ? 1 : 0;
-            const u = projectDetailTitleHoverUniforms[ti];
-            u.value += (titleTarget - u.value) * HOVER_LERP;
-        }
-        for (let wi = 0; wi < projectDetailWriteUpHoverUniforms.length; wi++) {
-            const writeUpTarget = hoveringProjectWriteUp && wi === activeProjectIndex ? 1 : 0;
-            const u = projectDetailWriteUpHoverUniforms[wi];
-            u.value += (writeUpTarget - u.value) * HOVER_LERP;
-        }
-        const backLinkTarget = hoveringBackLink ? 1 : 0;
-        backLinkHoverUniform.value += (backLinkTarget - backLinkHoverUniform.value) * HOVER_LERP;
 
         backInkProgress.value += (1 - backInkProgress.value) * Math.min(1, delta * BACK_INK_SPEED);
         if (backInkProgress.value > 0.996) backInkProgress.value = 1; // settle so the composite pass can stop
         updateBackFaceTextMask();
-        updateBackHoverPlaneVisibility();
+        if (!isDragging) updateBackHoverPlaneVisibility();
 
         if (!isDragging) {
             rotation.y += velocity.y;
@@ -2479,6 +2512,7 @@ function animate() {
         card.updateMatrixWorld();
         updateProjectFrameOverlay();
     }
+    renderer.setClearColor(0xffffff, 0);
     renderer.render(scene, camera);
     renderWalletButtonRefraction(now * 0.001);
 }
