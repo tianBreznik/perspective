@@ -24,9 +24,11 @@ export function measureTextLabel(text, size, font, curveSegments = BAKE_CURVE_SE
     const g = new TextGeometry(text, { font, size, height: 0.001, curveSegments, bevelEnabled: false });
     g.computeBoundingBox();
     const w = g.boundingBox.max.x - g.boundingBox.min.x;
-    const h = g.boundingBox.max.y - g.boundingBox.min.y;
+    const ascent = g.boundingBox.max.y;
+    const descent = -g.boundingBox.min.y;
+    const h = ascent + descent;
     g.dispose();
-    return { w, h };
+    return { w, h, ascent, descent };
 }
 
 export function wrapTextLines(text, size, maxW, font, curveSegments) {
@@ -82,12 +84,17 @@ export function buildProjectIndexLayout(items, font, curveSegments) {
         ...item,
         ...measureTextLabel(item.title, PROJECT_INDEX_SIZE, font, curveSegments),
     }));
-    const totalH = metrics.reduce((sum, m) => sum + m.h, 0) + PROJECT_INDEX_GAP * (metrics.length - 1);
-    let cursorY = totalH / 2;
-    const entries = metrics.map((m) => {
-        cursorY -= m.h;
-        const entry = { ...m, x: -m.w / 2, y: cursorY };
-        cursorY -= PROJECT_INDEX_GAP;
+    // Space by cap-line → next-line-top so mixed-case / descender titles don't look extra open.
+    const totalH = metrics[0].ascent
+        + metrics.slice(1).reduce((sum, m) => sum + m.ascent, 0)
+        + metrics[metrics.length - 1].descent
+        + PROJECT_INDEX_GAP * (metrics.length - 1);
+    let baselineY = totalH / 2 - metrics[0].ascent;
+    const entries = metrics.map((m, i) => {
+        const entry = { ...m, x: -m.w / 2, y: baselineY };
+        if (i < metrics.length - 1) {
+            baselineY -= PROJECT_INDEX_GAP + metrics[i + 1].ascent;
+        }
         return entry;
     });
     const backMetrics = measureTextLabel(BACK_LINK_LABEL, BACK_LINK_SIZE, font, curveSegments);

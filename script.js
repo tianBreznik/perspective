@@ -16,6 +16,7 @@ import mbosGifSrc from './src/assets/textures/Paper001_2K-JPG/mbOS.gif';
 import walletPassUrl from './perspective-card.pkpass?url';
 import { PROJECT_INDEX_ITEMS, projectTextureUrl } from './src/project-index-data.js';
 import {
+    buildProjectIndexLayout,
     getProjectDetailDescriptionLayout as layoutProjectDetailDescription,
     getProjectDetailTitleLayout as layoutProjectDetailTitle,
 } from './src/bake/project-detail-render.js';
@@ -136,6 +137,8 @@ function renderTextToTexture(textItems, opts = {}) {
             const cx = (geom.boundingBox.min.x + geom.boundingBox.max.x) / 2;
             const cy = (geom.boundingBox.min.y + geom.boundingBox.max.y) / 2;
             geom.translate(-cx, -cy, 0);
+        } else if (item.baseline) {
+            geom.translate(item.x - geom.boundingBox.min.x, item.y, 0);
         } else {
             geom.translate(
                 item.x - geom.boundingBox.min.x,
@@ -204,7 +207,7 @@ function renderProjectIndexToTexture(layout) {
             bevelEnabled: false,
         });
         geom.computeBoundingBox();
-        geom.translate(entry.x - geom.boundingBox.min.x, entry.y - geom.boundingBox.min.y, 0);
+        geom.translate(entry.x - geom.boundingBox.min.x, entry.y, 0);
         orthoScene.add(new THREE.Mesh(geom, textMat));
     }
 
@@ -453,7 +456,6 @@ const projectIndexItems = PROJECT_INDEX_ITEMS.map((item) =>
     item.slug === 'maribor-on-sea' ? { ...item, image: mbosGifSrc } : item
 );
 const PROJECT_INDEX_SIZE = backButtonSize * 0.82;
-const PROJECT_INDEX_GAP = 0.24;
 const BACK_LINK_LABEL = 'back';
 const BACK_LINK_SIZE = backButtonSize * 0.82;
 
@@ -463,35 +465,14 @@ function measureTextLabel(text, size, typeface = backButtonFont) {
     const g = new TextGeometry(text, { font: typeface, size, height: 0.001, curveSegments: TEXT_CURVE_SEGMENTS, bevelEnabled: false });
     g.computeBoundingBox();
     const w = g.boundingBox.max.x - g.boundingBox.min.x;
-    const h = g.boundingBox.max.y - g.boundingBox.min.y;
+    const ascent = g.boundingBox.max.y;
+    const descent = -g.boundingBox.min.y;
+    const h = ascent + descent;
     g.dispose();
-    return { w, h };
+    return { w, h, ascent, descent };
 }
 
-function buildProjectIndexLayout() {
-    const metrics = projectIndexItems.map((item) => ({
-        ...item,
-        ...measureTextLabel(item.title, PROJECT_INDEX_SIZE),
-    }));
-    const totalH = metrics.reduce((sum, m) => sum + m.h, 0) + PROJECT_INDEX_GAP * (metrics.length - 1);
-    let cursorY = totalH / 2;
-    const entries = metrics.map((m) => {
-        cursorY -= m.h;
-        const entry = { ...m, x: -m.w / 2, y: cursorY };
-        cursorY -= PROJECT_INDEX_GAP;
-        return entry;
-    });
-    const backMetrics = measureTextLabel(BACK_LINK_LABEL, BACK_LINK_SIZE);
-    const backLink = {
-        label: BACK_LINK_LABEL,
-        ...backMetrics,
-        x: -cardWidth / 2 + 0.12,
-        y: cardHeight / 2 - 0.12 - backMetrics.h,
-    };
-    return { entries, backLink };
-}
-
-const projectIndexLayout = buildProjectIndexLayout();
+const projectIndexLayout = buildProjectIndexLayout(projectIndexItems, backButtonFont, TEXT_CURVE_SEGMENTS);
 
 const BACK_UV_FLIP_X = true;
 const hoverUniform = { value: 0 };
@@ -1036,7 +1017,14 @@ function initCard() {
     );
 
     const projectIndexMaskTextures = projectIndexLayout.entries.map((entry) =>
-        renderTextToTexture([{ text: entry.title, font: backButtonFont, size: PROJECT_INDEX_SIZE, x: entry.x, y: entry.y }])
+        renderTextToTexture([{
+            text: entry.title,
+            font: backButtonFont,
+            size: PROJECT_INDEX_SIZE,
+            x: entry.x,
+            y: entry.y,
+            baseline: true,
+        }])
     );
     const backLinkMaskTexture = renderTextToTexture([{
         text: projectIndexLayout.backLink.label,
@@ -1228,11 +1216,12 @@ function initCard() {
     projectIndexLayout.entries.forEach((entry, i) => {
         const centerX = entry.x + entry.w / 2;
         const mirroredX = -centerX;
+        const centerY = entry.y + (entry.ascent - entry.descent) / 2;
         const itemPlane = createHoverPlane(
             entry.w + pad * 2,
             entry.h + pad * 2,
             mirroredX,
-            entry.y + entry.h / 2,
+            centerY,
             backZ,
             Math.PI
         );
@@ -1655,7 +1644,7 @@ function tryBackProjectsLayoutTap(hits) {
     for (let i = 0; i < projectIndexLayout.entries.length; i++) {
         const entry = projectIndexLayout.entries[i];
         if (layout.x >= entry.x - pad && layout.x <= entry.x + entry.w + pad
-            && layout.y >= entry.y - pad && layout.y <= entry.y + entry.h + pad) {
+            && layout.y >= entry.y - entry.descent - pad && layout.y <= entry.y + entry.ascent + pad) {
             projectIndexHoverUniforms[i].value = 1;
             setTimeout(() => { projectIndexHoverUniforms[i].value = 0; }, 250);
             handleProjectIndexClick(i);
