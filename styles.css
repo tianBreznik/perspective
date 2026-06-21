@@ -226,7 +226,7 @@ body:active {
     -webkit-backdrop-filter: blur(4px);
 }
 
-.section-dialog[open] {
+.section-dialog[open]:not(.popup-window) {
     animation: dialog-in 220ms ease forwards;
 }
 
@@ -278,25 +278,46 @@ body:active {
     color: #444;
 }
 
-/* Popup-window dialogs: mobile stand-in for the desktop window.open popups.
-   Styled after classic Mac OS X Aqua windows: gray gradient titlebar,
-   traffic-light close button, deep drop shadow. */
-.section-dialog.popup-window {
+/* Popup-window: floating Aqua panels — no dialog.showModal (no backdrop / no inert page) */
+dialog.section-dialog.popup-window {
+    position: fixed;
+    inset: auto;
+    top: 72px;
+    left: clamp(24px, 8vw, 120px);
+    margin: 0;
+    transform: none;
     width: min(var(--popup-w, 700px), 92vw);
     height: min(var(--popup-h, 600px), 82vh);
+    max-width: min(var(--popup-w, 700px), 92vw);
     max-height: 82vh;
     padding: 0;
-    display: flex;
-    flex-direction: column;
+    border: 1px solid rgba(55, 55, 55, 0.55);
     border-radius: 8px;
     background: #ececec;
-    border: 1px solid rgba(55, 55, 55, 0.55);
     box-shadow: none;
+    -webkit-appearance: none;
+    appearance: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     overflow: hidden;
+    z-index: 100;
+    display: none;
+    flex-direction: column;
+    color: #1a1a1a;
 }
 
-.section-dialog.popup-window:not([open]) {
-    display: none;
+dialog.section-dialog.popup-window[open] {
+    display: flex;
+    animation: popup-dialog-in 160ms ease forwards;
+}
+
+@keyframes popup-dialog-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.section-dialog.popup-window.is-dragging {
+    user-select: none;
 }
 
 .popup-titlebar {
@@ -310,6 +331,14 @@ body:active {
     border-bottom: 1px solid #9c9c9c;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
     flex: 0 0 auto;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.popup-titlebar:active {
+    cursor: grabbing;
 }
 
 .popup-title {
@@ -480,13 +509,15 @@ body:active {
         margin: 0;
     }
 
-    /* Popup windows stay windowed on mobile, like their desktop counterparts */
-    .section-dialog.popup-window {
-        width: min(var(--popup-w, 700px), 92vw);
-        height: min(var(--popup-h, 600px), 82vh);
-        max-height: 82vh;
+    /* Popup windows stay windowed on mobile */
+    dialog.section-dialog.popup-window {
+        top: 56px;
+        left: clamp(12px, 4vw, 32px);
+        transform: none;
+        width: min(var(--popup-w, 700px), 92vw) !important;
+        height: min(var(--popup-h, 600px), 82vh) !important;
+        max-height: 82vh !important;
         border-radius: 8px;
-        margin: auto;
         box-shadow: none;
         backdrop-filter: none;
         -webkit-backdrop-filter: none;

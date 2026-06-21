@@ -11,7 +11,8 @@ import { PNG } from 'pngjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
-const OUT_DIR = path.join(ROOT, 'public/project-textures');
+const PROJECT_OUT_DIR = path.join(ROOT, 'public/project-textures');
+const CARD_OUT_DIR = path.join(ROOT, 'public/card-textures');
 const BAKE_PORT = 3457;
 const BAKE_URL = `http://127.0.0.1:${BAKE_PORT}/bake-tool.html`;
 
@@ -51,19 +52,35 @@ try {
     await waitForServer(BAKE_URL);
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
+    page.on('console', (msg) => {
+        const text = msg.text();
+        if (text.startsWith('[bake]')) console.log(text);
+    });
+
     await page.goto(BAKE_URL, { waitUntil: 'networkidle' });
-    await page.waitForFunction(() => window.__bakeComplete, null, { timeout: 120000 });
+    await page.waitForFunction(() => window.__bakeComplete || window.__bakeError, null, { timeout: 600000 });
+    const bakeError = await page.evaluate(() => window.__bakeError);
+    if (bakeError) throw new Error(bakeError);
     const baked = await page.evaluate(() => window.__bakedTextures);
 
     for (const entry of baked) {
-        const dir = path.join(OUT_DIR, entry.slug);
+        if (entry.group === 'card') {
+            fs.mkdirSync(CARD_OUT_DIR, { recursive: true });
+            const outPath = path.join(CARD_OUT_DIR, `${entry.name}.png`);
+            fs.writeFileSync(outPath, PNG.sync.write(base64ToPngBuffer(entry.base64)));
+            console.log(`Wrote ${path.relative(ROOT, outPath)}`);
+            continue;
+        }
+        const dir = path.join(PROJECT_OUT_DIR, entry.slug);
         fs.mkdirSync(dir, { recursive: true });
         const outPath = path.join(dir, `${entry.name}.png`);
         fs.writeFileSync(outPath, PNG.sync.write(base64ToPngBuffer(entry.base64)));
         console.log(`Wrote ${path.relative(ROOT, outPath)}`);
     }
 
-    console.log(`Done — ${baked.length} textures in public/project-textures/`);
+    const cardCount = baked.filter((e) => e.group === 'card').length;
+    const projectCount = baked.length - cardCount;
+    console.log(`Done — ${cardCount} card + ${projectCount} project textures`);
 } finally {
     if (browser) await browser.close();
     vite.kill('SIGTERM');

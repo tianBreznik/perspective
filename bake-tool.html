@@ -3,8 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <title>Bake project textures</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font: 13px/1.5 Menlo, Monaco, "Courier New", monospace;
+            background: #f5f5f5;
+            color: #333;
+        }
+        #bake-status {
+            padding: 24px 28px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            min-width: 320px;
+        }
+    </style>
 </head>
 <body>
+    <div id="bake-status">Starting bake…</div>
     <script type="module" src="/scripts/bake-tool-main.js"></script>
 </body>
 </html>

@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { getProjectDetailMetaList } from '../project-index-data.js';
 
-export const BAKE_TEXTURE_SIZE = 2048;
+export const BAKE_TEXTURE_SIZE = 1024;
 export const BAKE_CURVE_SEGMENTS = 64;
+export const TEXT_MASK_SUPERSAMPLE = 2;
+export const TEXT_MASK_SUPERSAMPLE_DESKTOP = 2;
 
 export const CARD_WIDTH = 4;
 export const CARD_HEIGHT = 2.5;
@@ -18,6 +21,11 @@ export const PROJECT_DETAIL_DESC_SIZE = 0.13 * 0.62;
 export const PROJECT_DETAIL_DESC_MAX_W = CARD_WIDTH - 0.36;
 export const PROJECT_DETAIL_DESC_LINE_GAP = 0.065;
 export const PROJECT_DETAIL_DESC_BOTTOM_MARGIN = 0.22;
+export const PROJECT_DETAIL_META_SIZE = PROJECT_DETAIL_DESC_SIZE * 0.88;
+export const PROJECT_DETAIL_META_LEFT = -CARD_WIDTH / 2 + 0.14;
+export const PROJECT_DETAIL_META_BOTTOM = -CARD_HEIGHT / 2 + 0.14;
+export const PROJECT_DETAIL_META_GAP = 0.045;
+export const PROJECT_DETAIL_META_DESC_GAP = 0.08;
 export const PROJECT_INDEX_GAP = 0.24;
 
 export function measureTextLabel(text, size, font, curveSegments = BAKE_CURVE_SEGMENTS) {
@@ -61,7 +69,11 @@ export function getProjectDetailDescriptionLayout(item, font, curveSegments) {
     if (!item.description) return null;
     const titleLayout = getProjectDetailTitleLayout(item, font, curveSegments);
     const lines = wrapTextLines(item.description, PROJECT_DETAIL_DESC_SIZE, PROJECT_DETAIL_DESC_MAX_W, font, curveSegments);
-    const minLineBottom = -CARD_HEIGHT / 2 + PROJECT_DETAIL_DESC_BOTTOM_MARGIN;
+    const metaLayout = getProjectDetailMetaLayout(item, font, curveSegments);
+    let minLineBottom = -CARD_HEIGHT / 2 + PROJECT_DETAIL_DESC_BOTTOM_MARGIN;
+    if (metaLayout) {
+        minLineBottom = Math.max(minLineBottom, metaLayout.top + PROJECT_DETAIL_META_DESC_GAP);
+    }
     let lineY = titleLayout.y - PROJECT_DETAIL_TITLE_DESC_GAP;
     const lineLayouts = [];
     for (const line of lines) {
@@ -77,6 +89,28 @@ export function getProjectDetailDescriptionLayout(item, font, curveSegments) {
     const minY = Math.min(...lineLayouts.map((l) => l.y));
     const maxY = Math.max(...lineLayouts.map((l) => l.y + l.h));
     return { lines: lineLayouts, x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+export function getProjectDetailMetaLayout(item, font, curveSegments) {
+    const rows = getProjectDetailMetaList(item);
+    if (!rows.length) return null;
+    let y = PROJECT_DETAIL_META_BOTTOM;
+    const lines = [];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const row of rows) {
+        const m = measureTextLabel(row, PROJECT_DETAIL_META_SIZE, font, curveSegments);
+        const line = { line: row, x: PROJECT_DETAIL_META_LEFT, y, w: m.w, h: m.h };
+        lines.push(line);
+        minX = Math.min(minX, line.x);
+        minY = Math.min(minY, line.y);
+        maxX = Math.max(maxX, line.x + line.w);
+        maxY = Math.max(maxY, line.y + line.h);
+        y += m.h + PROJECT_DETAIL_META_GAP;
+    }
+    return { lines, x: minX, y: minY, w: maxX - minX, h: maxY - minY, top: maxY };
 }
 
 export function buildProjectIndexLayout(items, font, curveSegments) {
@@ -123,24 +157,114 @@ function createOrthoScene(worldW, worldH) {
 function renderSceneToTarget(renderer, orthoScene, orthoCamera, worldW, worldH, textureSize) {
     const w = Math.round(textureSize);
     const h = Math.round(textureSize * (worldH / worldW));
-    const rt = new THREE.WebGLRenderTarget(w, h, {
+    return renderTextMaskScene(renderer, orthoScene, orthoCamera, w, h, TEXT_MASK_SUPERSAMPLE);
+}
+
+let downsampleScene = null;
+let downsampleCamera = null;
+let downsampleMaterial = null;
+
+function ensureDownsamplePass() {
+    if (downsampleMaterial) return;
+    downsampleCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    downsampleScene = new THREE.Scene();
+    downsampleMaterial = new THREE.ShaderMaterial({
+        uniforms: { tMap: { value: null } },
+        vertexShader: `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = vec4(position.xy, 0.0, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform sampler2D tMap;
+            varying vec2 vUv;
+            void main() {
+                vec2 px = 1.0 / vec2(textureSize(tMap, 0));
+                vec4 c = texture2D(tMap, vUv) * 0.2270270270;
+                c += texture2D(tMap, vUv + vec2(px.x, 0.0)) * 0.1945945946;
+                c += texture2D(tMap, vUv - vec2(px.x, 0.0)) * 0.1945945946;
+                c += texture2D(tMap, vUv + vec2(0.0, px.y)) * 0.1216216216;
+                c += texture2D(tMap, vUv - vec2(0.0, px.y)) * 0.1216216216;
+                c += texture2D(tMap, vUv + px) * 0.0702702703;
+                c += texture2D(tMap, vUv + vec2(-px.x, px.y)) * 0.0702702703;
+                c += texture2D(tMap, vUv - px) * 0.0702702703;
+                c += texture2D(tMap, vUv + vec2(px.x, -px.y)) * 0.0702702703;
+                gl_FragColor = c;
+            }
+        `,
+        depthTest: false,
+        depthWrite: false,
+    });
+    downsampleScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), downsampleMaterial));
+}
+
+function clampSupersample(renderer, w, h, supersample) {
+    const maxTex = renderer.capabilities.maxTextureSize || 8192;
+    const ss = Math.max(1, Math.min(
+        supersample,
+        Math.floor(maxTex / w),
+        Math.floor(maxTex / h),
+    ));
+    return ss;
+}
+
+export function renderTextMaskScene(renderer, orthoScene, orthoCamera, w, h, supersample = TEXT_MASK_SUPERSAMPLE, clearColor = 0xffffff) {
+    const ss = clampSupersample(renderer, w, h, supersample);
+    const msaa = renderer.capabilities.isWebGL2 ? 4 : 0;
+    const clear = new THREE.Color(clearColor);
+
+    const loRt = new THREE.WebGLRenderTarget(w, h, {
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
         format: THREE.RGBAFormat,
         type: THREE.UnsignedByteType,
         generateMipmaps: false,
+        samples: ss === 1 ? msaa : 0,
     });
 
     const prevRt = renderer.getRenderTarget();
     const prevClear = renderer.getClearColor(new THREE.Color());
-    renderer.setRenderTarget(rt);
-    renderer.setClearColor(0xffffff, 1);
+
+    if (ss === 1) {
+        renderer.setRenderTarget(loRt);
+        renderer.setClearColor(clear, 1);
+        renderer.clear();
+        renderer.render(orthoScene, orthoCamera);
+        renderer.setRenderTarget(prevRt);
+        renderer.setClearColor(prevClear);
+        return { rt: loRt, w, h };
+    }
+
+    ensureDownsamplePass();
+    const hw = w * ss;
+    const hh = h * ss;
+    const hiRt = new THREE.WebGLRenderTarget(hw, hh, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        generateMipmaps: false,
+        samples: msaa,
+    });
+
+    renderer.setRenderTarget(hiRt);
+    renderer.setClearColor(clear, 1);
     renderer.clear();
     renderer.render(orthoScene, orthoCamera);
+
+    downsampleMaterial.uniforms.tMap.value = hiRt.texture;
+    renderer.setRenderTarget(loRt);
+    renderer.setClearColor(clear, 1);
+    renderer.clear();
+    renderer.render(downsampleScene, downsampleCamera);
+
     renderer.setRenderTarget(prevRt);
     renderer.setClearColor(prevClear);
+    hiRt.dispose();
 
-    return { rt, w, h };
+    return { rt: loRt, w, h };
 }
 
 function addTextMesh(scene, text, size, x, y, font, curveSegments, inkMat) {
@@ -167,6 +291,13 @@ export function renderProjectDetailTarget(renderer, font, item, projectIndexLayo
     if (descLayout) {
         for (const line of descLayout.lines) {
             addTextMesh(orthoScene, line.line, PROJECT_DETAIL_DESC_SIZE, line.x, line.y, font, curveSegments, inkMat);
+        }
+    }
+
+    const metaLayout = getProjectDetailMetaLayout(item, font, curveSegments);
+    if (metaLayout) {
+        for (const line of metaLayout.lines) {
+            addTextMesh(orthoScene, line.line, PROJECT_DETAIL_META_SIZE, line.x, line.y, font, curveSegments, inkMat);
         }
     }
 

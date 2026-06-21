@@ -13,6 +13,9 @@
     "wallet-pass": "npm run generate-wallet-pass && npm run create-pkpass",
     "wallet-pass-signed": "npm run generate-wallet-pass && npm run create-pkpass-signed",
     "bake-project-textures": "node scripts/bake-project-textures.mjs",
+    "compress-paper-textures": "node scripts/compress-paper-textures.mjs",
+    "measure-load": "node scripts/measure-load.mjs",
+    "measure-load:preview": "npm run build && vite preview --port 4173 --strictPort & sleep 2 && node scripts/measure-load.mjs --preview; kill %1 2>/dev/null || true",
     "generate-favicons": "node scripts/generate-favicon-pngs.mjs"
   },
   "dependencies": {

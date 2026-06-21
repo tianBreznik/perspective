@@ -12,9 +12,15 @@ export default defineConfig({
   },
   publicDir: 'public', // Serve files from public directory
   build: {
+    target: 'es2022',
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
+      },
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/three')) return 'three';
+        },
       },
     },
   },

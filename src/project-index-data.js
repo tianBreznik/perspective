@@ -3,47 +3,75 @@ export const PROJECT_INDEX_ITEMS = [
     {
         slug: 'good-people-posting',
         title: 'Good People Posting',
-        description: 'A blogspace for a community of writers outside algorithmic publishing. TipTap with custom text blocks and annotated comment threads for discussion that stays on the page.',
+        meta: { year: '2026', medium: 'web', context: 'community publishing' },
+        collaborator: 'Silas Anker Saggau, PhD',
+        description: 'A blogspace for a community of writers outside algorithmic publishing. No feeds, no ranking: discussion stays on the page. Built on TipTap with custom ProseMirror blocks for long form writing, plus inline annotation and threaded comment layers so readers can respond to specific passages without leaving the text.',
         url: 'https://goodpeople.build',
     },
     {
         slug: 'weirdattachments-online',
         title: 'weirdattachments.online',
-        description: 'Texts published and republished in kindle form on mobile, pdf reader form on desktop. Custom editorial blocks; the work of making a book that keeps becoming.',
+        meta: { year: '2025', medium: 'editorial', context: 'publishing website' },
+        commission: 'Ema Maznik Antiċ',
+        description: 'A self-publishing book site built around a fully custom rich text editor: epigraphs, poetry blocks, footnotes, chapter titles and subtitles, per chapter backgrounds and page frames, and real time karaoke style highlighting synced to audio. Desktop renders as a PDF attachment reader; on mobile as an elevated kindle layout. Each author update snapshots a new edition of the book, a new attachment.',
         url: 'https://weirdattachments.online',
     },
     {
         slug: 'fall11',
         title: 'fall11',
-        description: 'imagenet-fall11 collaged on canvas; a custom SD-XL pipeline out-paints the gaps, in-paints the grain — an imagined topology between model and data.',
+        meta: { year: '2024', medium: 'collage + ML', context: 'Goldsmiths MA' },
+        description: 'Physical collage of imagenet fall11 printed on photo paper, mounted in vintage frames, then fed back through a custom Stable Diffusion XL pipeline trained on the same dataset. Outpainting extends the canvas into the gaps between images; inpainting retouches grain and seam. An imagined topology between model weights and photographic surface, machine opacity and the picture.',
         url: 'https://sites.gold.ac.uk/ma-mfa-computationalarts/tian-breznik/',
     },
     {
         slug: 'blink-a-link',
         title: 'blink-a-link',
-        description: 'With Ana Meisel. A page in memory of the HTML blink tag, rebuilt from live feeds on every reload. Exhibited at Alkatraz Gallery, Ljubljana.',
+        meta: { year: '2024', medium: 'web', context: 'Alkatraz Gallery' },
+        collaborator: 'Ana Meisel',
+        description: 'A browser installation for Unfamiliar Area, Galerija Alkatraz: a speculative page that reinstates the deprecated HTML blink tag as live infrastructure. On every reload the DOM is rebuilt from scraped feeds; blink cadence and source material shift with the network. Page and viewer stare back at each other, updating the same systems together.',
         url: 'https://blink.tian.ana.help',
         writeUpUrl: 'https://galerijalkatraz.org/?p=20186',
     },
     {
         slug: 'garden-painting',
         title: 'Garden Painting',
-        description: 'SketchRNN and a simulated watercolor pen. Seventy-six doodle classes compose a garden on each reload, the way a child fills a page and starts again.',
+        meta: { year: '2023', medium: 'interactive', context: 'SketchRNN' },
+        description: 'After a child\'s chalk and watercolor doodles on fridges and summer pavement. Google\'s SketchRNN runs in the browser, sampling from 76 trained doodle classes (pool, cat, owl, bear, butterfly and more) while a simulated watercolor pen lays stroke. Each reload composes a new garden; the model never draws the same page twice.',
         url: 'https://tianbreznik.github.io/earthly-delights/',
     },
     {
         slug: 'maribor-on-sea',
         title: 'Maribor-on-Sea',
-        description: 'Geocities gifs collaged into a township stuck on loop. Scraped from 656 GB of archive; the present moment put on repeat.',
+        meta: { year: '2024', medium: 'video', context: 'Geocities archive' },
+        description: 'Thousands of animated gifs recovered from a 656 GB Geocities archive, collaged into a single looping cityscape. Maribor relocated after Italo Calvino\'s Invisible Cities. The township runs on a fixed timeline, trapped in one moment. As installation, an I Spy exercise: a catalogue lists every gif by descriptor.',
         url: 'https://vimeo.com/943587649',
     },
     {
         slug: 'twitter-fatigue',
         title: 'twitter fatigue',
-        description: 'Hashtag archives from 2021, filtered through pandas and rendered in three.js. Each dot a tweet, each line a thread; mapping discourse as a mess.',
+        meta: { year: '2021', medium: 'data viz', context: 'hashtag archives' },
+        description: 'Hashtag archives from 2021, cleaned with pandas and rendered in three.js. An attempt to map how long topic specific discourse stays relevant before information fatigue sets in. Each vertex is a tweet; edges mark reply threads. Navigate the volume like a spaceship through the dataset. No clusters form, only a tangled, formless arrangement of debate in time.',
         url: 'https://tianbreznik.github.io/mementowip/index.html',
     },
 ];
+
+/** Footer list order: year → medium → context → with … → for … */
+export function getProjectDetailMetaList(item) {
+    const rows = [];
+    const m = item.meta;
+    if (m && typeof m === 'object' && !Array.isArray(m)) {
+        if (m.year) rows.push(String(m.year));
+        if (m.medium) rows.push(m.medium);
+        if (m.context) rows.push(m.context);
+    } else if (Array.isArray(item.meta)) {
+        for (const row of item.meta) {
+            if (row) rows.push(row);
+        }
+    }
+    if (item.collaborator) rows.push(`with ${item.collaborator}`);
+    if (item.commission) rows.push(`for ${item.commission}`);
+    return rows;
+}
 
 export function projectTextureUrl(slug, name) {
     return `/project-textures/${slug}/${name}.png`;
