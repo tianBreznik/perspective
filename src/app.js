@@ -8,7 +8,7 @@ import displacementMap from './assets/textures/Paper001_2K-JPG/Paper001_2K-JPG_D
 import stickerSrc from './assets/reretouchedemoji.png';
 import mbosGifSrc from './assets/textures/Paper001_2K-JPG/mbOS.gif';
 import walletPassUrl from '../perspective-card.pkpass?url';
-import { PROJECT_INDEX_ITEMS, projectTextureUrl } from './project-index-data.js';
+import { PROJECT_INDEX_ITEMS, projectTextureUrl, buildProjectDetailFooter } from './project-index-data.js';
 import {
     BACK_BUTTON_LABELS,
     BACK_BUTTON_SIZE,
@@ -30,6 +30,7 @@ const [
     {
         getProjectDetailDescriptionLayout: layoutProjectDetailDescription,
         getProjectDetailTitleLayout: layoutProjectDetailTitle,
+        getProjectDetailMetaLayout: layoutProjectDetailMeta,
         renderTextMaskScene,
         TEXT_MASK_SUPERSAMPLE,
         TEXT_MASK_SUPERSAMPLE_DESKTOP,
@@ -214,6 +215,10 @@ function getProjectDetailDescriptionLayout(item) {
     return layoutProjectDetailDescription(item, backButtonFont, TEXT_CURVE_SEGMENTS);
 }
 
+function getProjectDetailMetaLayout(item) {
+    return layoutProjectDetailMeta(item, backButtonFont, TEXT_CURVE_SEGMENTS);
+}
+
 function configureBakedProjectTexture(tex) {
     tex.colorSpace = THREE.SRGBColorSpace;
     // PNGs from the baker are top-left origin; Three.js image textures need flipY true
@@ -281,13 +286,13 @@ function loadProjectDetailTexture(index) {
 
 function attachProjectDetailMaskOverlay(index, kind, maskTexture) {
     if (!card) return;
-    const overlays = kind === 'title' ? backProjectDetailOverlays : backProjectDetailDescOverlays;
+    const overlays = kind === 'title' ? backProjectDetailOverlays : backProjectDetailFooterLinkOverlays;
     if (overlays.some((mesh) => mesh.userData.projectIndex === index)) return;
 
     const overlayZ = -cardDepth / 2 + 0.002;
     const hoverUniform = kind === 'title'
         ? projectDetailTitleHoverUniforms[index]
-        : projectDetailWriteUpHoverUniforms[index];
+        : projectDetailFooterLinkHoverUniforms[index];
     const overlay = createBackHighlightOverlay(maskTexture, hoverUniform, card, overlayZ);
     overlay.userData.projectIndex = index;
     overlay.visible = false;
@@ -307,9 +312,9 @@ function loadProjectDetailMask(index, kind) {
 
     const item = projectIndexItems[index];
     if (!item) return Promise.resolve(null);
-    const maskName = kind === 'title' ? 'title-mask' : 'desc-mask';
+    const maskName = kind === 'title' ? 'title-mask' : 'footer-link-mask';
     if (kind === 'title' && !item.url && !item.image) return Promise.resolve(null);
-    if (kind === 'desc' && !(item.writeUpUrl && item.description)) return Promise.resolve(null);
+    if (kind === 'footer-link' && !buildProjectDetailFooter(item).link) return Promise.resolve(null);
 
     const promise = new Promise((resolve) => {
         textureLoader.load(
@@ -340,8 +345,8 @@ function ensureProjectDetailAssets(index, { applyTexture = false } = {}) {
         });
     }
     const maskPromises = [loadProjectDetailMask(index, 'title')];
-    if (projectIndexItems[index]?.writeUpUrl && projectIndexItems[index]?.description) {
-        maskPromises.push(loadProjectDetailMask(index, 'desc'));
+    if (buildProjectDetailFooter(projectIndexItems[index]).link) {
+        maskPromises.push(loadProjectDetailMask(index, 'footer-link'));
     }
     return Promise.all([detailPromise, ...maskPromises]);
 }
@@ -713,17 +718,17 @@ let backHomeHoverPlanes = [];
 let backProjectsHoverPlanes = [];
 let backProjectDetailHoverPlanes = [];
 let backProjectDetailOverlays = [];
-let backProjectDetailDescOverlays = [];
+let backProjectDetailFooterLinkOverlays = [];
 let backEmailOverlay = null;
 let backButtonOverlays = [];
 let backProjectsOverlays = [];
 let projectIndexHoverUniforms = [];
 let projectDetailTitleHoverUniforms = projectIndexItems.map(() => ({ value: 0 }));
-let projectDetailWriteUpHoverUniforms = projectIndexItems.map(() => ({ value: 0 }));
+let projectDetailFooterLinkHoverUniforms = projectIndexItems.map(() => ({ value: 0 }));
 let backLinkHoverUniform = { value: 0 };
 let hoveringProjectIndex = -1;
 let hoveringProjectTitle = false;
-let hoveringProjectWriteUp = false;
+let hoveringProjectFooterLink = false;
 let hoveringBackLink = false;
 
 function isBackInkTransitioning() {
@@ -757,12 +762,12 @@ function resetBackHoverState() {
     hoveringBackButton = -1;
     hoveringProjectIndex = -1;
     hoveringProjectTitle = false;
-    hoveringProjectWriteUp = false;
+    hoveringProjectFooterLink = false;
     hoveringBackLink = false;
     backButtonHoverUniforms.forEach((u) => { u.value = 0; });
     projectIndexHoverUniforms.forEach((u) => { u.value = 0; });
     projectDetailTitleHoverUniforms.forEach((u) => { u.value = 0; });
-    projectDetailWriteUpHoverUniforms.forEach((u) => { u.value = 0; });
+    projectDetailFooterLinkHoverUniforms.forEach((u) => { u.value = 0; });
     backLinkHoverUniform.value = 0;
 }
 
@@ -804,10 +809,13 @@ function updateBackHoverPlaneVisibility() {
     const showHomeInk = isBackHomeActive();
     const showProjects = isBackProjectsActive();
     const showDetail = isBackProjectDetailActive();
-    const showBackLink = showProjects || showDetail;
     backHomeHoverPlanes.forEach((plane) => { plane.visible = showHomeNav; });
     backProjectsHoverPlanes.forEach((plane) => {
-        plane.visible = plane.userData.kind === 'backLink' ? showBackLink : showProjects;
+        if (plane.userData.kind === 'backLink') {
+            plane.visible = plane.userData.backLinkContext === 'list' ? showProjects : showDetail;
+        } else {
+            plane.visible = showProjects;
+        }
     });
     backProjectDetailHoverPlanes.forEach((plane) => {
         plane.visible = showDetail && plane.userData.projectIndex === activeProjectIndex;
@@ -815,12 +823,14 @@ function updateBackHoverPlaneVisibility() {
     if (backEmailOverlay) backEmailOverlay.visible = showHomeInk;
     backButtonOverlays.forEach((mesh) => { mesh.visible = showHomeInk; });
     backProjectsOverlays.forEach((mesh) => {
-        mesh.visible = mesh.userData.isBackLinkOverlay ? showBackLink : showProjects;
+        if (mesh.userData.isBackLinkListOverlay) mesh.visible = showProjects;
+        else if (mesh.userData.isBackLinkDetailOverlay) mesh.visible = showDetail;
+        else mesh.visible = showProjects;
     });
     backProjectDetailOverlays.forEach((mesh) => {
         mesh.visible = showDetail && mesh.userData.projectIndex === activeProjectIndex;
     });
-    backProjectDetailDescOverlays.forEach((mesh) => {
+    backProjectDetailFooterLinkOverlays.forEach((mesh) => {
         mesh.visible = showDetail && mesh.userData.projectIndex === activeProjectIndex;
     });
 }
@@ -1013,7 +1023,7 @@ function disposeCard() {
     backProjectsHoverPlanes = [];
     backProjectDetailHoverPlanes = [];
     backProjectDetailOverlays = [];
-    backProjectDetailDescOverlays = [];
+    backProjectDetailFooterLinkOverlays = [];
     backEmailOverlay = null;
     backButtonOverlays = [];
     backProjectsOverlays = [];
@@ -1037,7 +1047,8 @@ function initCard() {
     const projectIndexMaskTextures = PROJECT_INDEX_ITEMS.map(
         (item) => cardBakedTextures[cardIndexTextureKey(item.slug)],
     );
-    const backLinkMaskTexture = cardBakedTextures['back-link-mask'];
+    const backLinkListMaskTexture = cardBakedTextures['back-link-mask'];
+    const backLinkDetailMaskTexture = cardBakedTextures['back-link-detail-mask'];
 
     const frontMaterial = createEngravedMaterial({}, frontTextTexture, false, frontLetterColorsTexture, true);
     const backMaterial = createEngravedMaterial({}, backHomeTextTexture, BACK_UV_FLIP_X, null, false, null, null, backTextMaskUniform);
@@ -1049,6 +1060,7 @@ function initCard() {
         backMaterial,
     ]);
     card.userData.buildVersion = CARD_BUILD_VERSION;
+    card.rotation.order = 'YXZ';
     cardPaperMaterials = [sideMaterial, frontMaterial, backMaterial];
     scene.add(card);
 
@@ -1099,9 +1111,12 @@ function initCard() {
     projectIndexMaskTextures.forEach((maskTex, i) => {
         backProjectsOverlays.push(createBackHighlightOverlay(maskTex, projectIndexHoverUniforms[i], card, overlayZ));
     });
-    const backLinkOverlay = createBackHighlightOverlay(backLinkMaskTexture, backLinkHoverUniform, card, overlayZ);
-    backLinkOverlay.userData.isBackLinkOverlay = true;
-    backProjectsOverlays.push(backLinkOverlay);
+    const backLinkListOverlay = createBackHighlightOverlay(backLinkListMaskTexture, backLinkHoverUniform, card, overlayZ);
+    backLinkListOverlay.userData.isBackLinkListOverlay = true;
+    backProjectsOverlays.push(backLinkListOverlay);
+    const backLinkDetailOverlay = createBackHighlightOverlay(backLinkDetailMaskTexture, backLinkHoverUniform, card, overlayZ);
+    backLinkDetailOverlay.userData.isBackLinkDetailOverlay = true;
+    backProjectsOverlays.push(backLinkDetailOverlay);
 
     reattachCachedProjectDetailMasks();
 
@@ -1220,20 +1235,38 @@ function initCard() {
         backProjectsHoverPlanes.push(itemPlane);
     });
 
-    const backLink = projectIndexLayout.backLink;
-    const backLinkCenterX = backLink.x + backLink.w / 2;
-    const backLinkPlane = createHoverPlane(
-        backLink.w + pad * 2,
-        backLink.h + pad * 2,
-        -backLinkCenterX,
-        backLink.y + backLink.h / 2,
+    const backLinkList = projectIndexLayout.backLink;
+    const backLinkListCenterX = backLinkList.x + backLinkList.w / 2;
+    const backLinkListCenterY = backLinkList.y + backLinkList.h / 2;
+    const backLinkListPlane = createHoverPlane(
+        backLinkList.w + pad * 2,
+        backLinkList.h + pad * 2,
+        -backLinkListCenterX,
+        backLinkListCenterY,
         backZ,
         Math.PI
     );
-    backLinkPlane.userData.kind = 'backLink';
-    backLinkPlane.visible = false;
-    card.add(backLinkPlane);
-    backProjectsHoverPlanes.push(backLinkPlane);
+    backLinkListPlane.userData.kind = 'backLink';
+    backLinkListPlane.userData.backLinkContext = 'list';
+    backLinkListPlane.visible = false;
+    card.add(backLinkListPlane);
+    backProjectsHoverPlanes.push(backLinkListPlane);
+
+    const backLinkDetail = projectIndexLayout.backLinkDetail;
+    const backLinkDetailCenterX = backLinkDetail.x + backLinkDetail.w / 2;
+    const backLinkDetailPlane = createHoverPlane(
+        backLinkDetail.w + pad * 2,
+        backLinkDetail.h + pad * 2,
+        -backLinkDetailCenterX,
+        backLinkDetail.y + backLinkDetail.h / 2,
+        backZ,
+        Math.PI
+    );
+    backLinkDetailPlane.userData.kind = 'backLink';
+    backLinkDetailPlane.userData.backLinkContext = 'detail';
+    backLinkDetailPlane.visible = false;
+    card.add(backLinkDetailPlane);
+    backProjectsHoverPlanes.push(backLinkDetailPlane);
 
     projectIndexItems.forEach((item, i) => {
         if (!item.url && !item.image) return;
@@ -1252,6 +1285,23 @@ function initCard() {
         titlePlane.visible = false;
         card.add(titlePlane);
         backProjectDetailHoverPlanes.push(titlePlane);
+
+        const linkLayout = getProjectDetailMetaLayout(item)?.linkLayout;
+        if (!linkLayout) return;
+        const linkCenterX = linkLayout.x + linkLayout.w / 2;
+        const footerLinkPlane = createHoverPlane(
+            linkLayout.w + pad * 2,
+            linkLayout.h + pad * 2,
+            -linkCenterX,
+            linkLayout.y + linkLayout.h / 2,
+            backZ,
+            Math.PI
+        );
+        footerLinkPlane.userData.kind = 'projectFooterLink';
+        footerLinkPlane.userData.projectIndex = i;
+        footerLinkPlane.visible = false;
+        card.add(footerLinkPlane);
+        backProjectDetailHoverPlanes.push(footerLinkPlane);
     });
 
     performance.mark('card-ready');
@@ -1378,17 +1428,24 @@ function hitTestEmailAtLayout(x, y, pad = BACK_HOME_HIT_PAD) {
         && y >= emailY - pad && y <= emailY + emailHeight + pad;
 }
 
-function hitTestProjectWriteUpAtLayout(x, y, item, pad = BACK_HOME_HIT_PAD) {
-    if (!item?.writeUpUrl) return false;
-    const descLayout = getProjectDetailDescriptionLayout(item);
-    if (!descLayout) return false;
-    for (const line of descLayout.lines) {
-        if (x >= line.x - pad && x <= line.x + line.w + pad
-            && y >= line.y - pad && y <= line.y + line.h + pad) {
-            return true;
-        }
-    }
-    return false;
+function hitTestProjectFooterLinkAtLayout(x, y, item, pad = BACK_HOME_HIT_PAD) {
+    const metaLayout = getProjectDetailMetaLayout(item);
+    const link = metaLayout?.linkLayout;
+    if (!link) return false;
+    return x >= link.x - pad && x <= link.x + link.w + pad
+        && y >= link.y - pad && y <= link.y + link.h + pad;
+}
+
+function hitTestBackLinkListAtLayout(x, y, pad = BACK_HOME_HIT_PAD) {
+    const backLink = projectIndexLayout.backLink;
+    return x >= backLink.x - pad && x <= backLink.x + backLink.w + pad
+        && y >= backLink.y - pad && y <= backLink.y + backLink.h + pad;
+}
+
+function hitTestBackLinkDetailAtLayout(x, y, pad = BACK_HOME_HIT_PAD) {
+    const backLink = projectIndexLayout.backLinkDetail;
+    return x >= backLink.x - pad && x <= backLink.x + backLink.w + pad
+        && y >= backLink.y - pad && y <= backLink.y + backLink.h + pad;
 }
 
 function triggerBackButtonClick(index) {
@@ -1431,7 +1488,7 @@ function updateHover() {
     hoveringBackButton = -1;
     hoveringProjectIndex = -1;
     hoveringProjectTitle = false;
-    hoveringProjectWriteUp = false;
+    hoveringProjectFooterLink = false;
     hoveringBackLink = false;
 
     for (const hit of hits) {
@@ -1451,13 +1508,17 @@ function updateHover() {
         if (kind === 'projectTitle' && backVisible && isBackProjectDetailActive()) {
             hoveringProjectTitle = true;
         }
+        if (kind === 'projectFooterLink' && backVisible && isBackProjectDetailActive()
+            && hit.object.userData.projectIndex === activeProjectIndex) {
+            hoveringProjectFooterLink = true;
+        }
         if (kind === 'backLink' && backVisible && (isBackProjectsActive() || isBackProjectDetailActive())) hoveringBackLink = true;
     }
 
-    if (backVisible && isBackProjectDetailActive() && !hoveringProjectWriteUp && activeProjectItem) {
+    if (backVisible && isBackProjectDetailActive() && !hoveringProjectFooterLink && activeProjectItem) {
         const layout = getBackFaceLayoutFromHits(hits);
-        if (layout && hitTestProjectWriteUpAtLayout(layout.x, layout.y, activeProjectItem)) {
-            hoveringProjectWriteUp = true;
+        if (layout && hitTestProjectFooterLinkAtLayout(layout.x, layout.y, activeProjectItem)) {
+            hoveringProjectFooterLink = true;
         }
     }
 
@@ -1475,18 +1536,98 @@ function updateHover() {
 const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
 scene.add(ambientLight);
 
-// Rotation controls with damping
+// Card-flip rotation — tune these constants to adjust feel
+const YAW_SENSITIVITY = IS_MOBILE ? 0.018 : 0.016;
+const PITCH_SENSITIVITY = IS_MOBILE ? 0.0045 : 0.004;
+const MAX_CARD_PITCH = Math.PI / 6;
+const ROTATION_DAMPING = 0.9;        // per 60 fps frame; coast after release
+const FACE_SNAP_SPEED = 5.5;         // spring toward front/back — only after coast stops
+const SNAP_START_THRESHOLD = 0.012;  // rad/frame — snap engages below this speed
+const SNAP_SETTLE_EPS = 0.0008;
+const RELEASE_VELOCITY_SCALE = 0.4;
+const DRAG_THRESHOLD_PX = IS_MOBILE ? 4 : 5;
+const CARD_CAPTURE_EPS_PX = 2;
+
 let isDragging = false;
 let suppressNextCardClick = false;
 let pointerDownPos = null;
-let dragClientPos = null;
 let previousMousePosition = { x: 0, y: 0 };
 let rotation = { x: 0, y: 0 };
 let velocity = { x: 0, y: 0 };
-const ROTATION_SENSITIVITY = 0.005;
-const DAMPING = 0.96;
-const DRAG_THRESHOLD_PX = 6;
-const CARD_CAPTURE_EPS_PX = 2;
+let dragYawSign = 1;
+
+function lerpAngle(current, target, t) {
+    let delta = target - current;
+    delta = ((delta + Math.PI) % (Math.PI * 2)) - Math.PI;
+    if (delta < -Math.PI) delta += Math.PI * 2;
+    return current + delta * t;
+}
+
+function getNearestCardFaceYaw(yaw) {
+    const norm = THREE.MathUtils.euclideanModulo(yaw + Math.PI, Math.PI * 2) - Math.PI;
+    if (Math.abs(norm) < Math.PI / 2) {
+        return yaw - norm;
+    }
+    const toBack = norm > 0 ? Math.PI - norm : -Math.PI - norm;
+    return yaw + toBack;
+}
+
+function getStableYawDragSign(yaw = rotation.y) {
+    const norm = THREE.MathUtils.euclideanModulo(yaw + Math.PI, Math.PI * 2) - Math.PI;
+    return Math.abs(norm) < Math.PI / 2 ? 1 : -1;
+}
+
+function clampCardPitch() {
+    rotation.x = Math.max(-MAX_CARD_PITCH, Math.min(MAX_CARD_PITCH, rotation.x));
+}
+
+function applyCardRotationDelta(deltaX, deltaY) {
+    if (!card || (!deltaX && !deltaY)) return;
+    const rotYaw = deltaX * YAW_SENSITIVITY * dragYawSign;
+    const rotPitch = -deltaY * PITCH_SENSITIVITY;
+    rotation.y += rotYaw;
+    rotation.x += rotPitch;
+    clampCardPitch();
+    velocity.y = rotYaw;
+    velocity.x = rotPitch;
+    card.rotation.y = rotation.y;
+    card.rotation.x = rotation.x;
+}
+
+function updateCardRotationPhysics(delta) {
+    if (!card || isDragging) return;
+
+    const frameScale = delta * 60;
+    const damp = Math.pow(ROTATION_DAMPING, frameScale);
+    rotation.y += velocity.y * frameScale;
+    rotation.x += velocity.x * frameScale;
+    velocity.y *= damp;
+    velocity.x *= damp;
+    clampCardPitch();
+
+    const coasting = Math.hypot(velocity.x, velocity.y);
+    if (coasting >= SNAP_START_THRESHOLD) {
+        card.rotation.y = rotation.y;
+        card.rotation.x = rotation.x;
+        return;
+    }
+
+    const snapT = 1 - Math.exp(-FACE_SNAP_SPEED * delta);
+    const targetYaw = getNearestCardFaceYaw(rotation.y);
+    rotation.y = lerpAngle(rotation.y, targetYaw, snapT);
+    rotation.x = THREE.MathUtils.lerp(rotation.x, 0, snapT);
+    clampCardPitch();
+    velocity.x = 0;
+    velocity.y = 0;
+
+    if (Math.abs(rotation.y - targetYaw) < SNAP_SETTLE_EPS && Math.abs(rotation.x) < SNAP_SETTLE_EPS) {
+        rotation.y = targetYaw;
+        rotation.x = 0;
+    }
+
+    card.rotation.y = rotation.y;
+    card.rotation.x = rotation.x;
+}
 
 function getCardFacingFactor() {
     if (!card) return 1;
@@ -1547,15 +1688,20 @@ function updateProjectFramePerformance() {
 function beginCardPointer(clientX, clientY, event) {
     pointerDownPos = { x: clientX, y: clientY };
     isDragging = false;
-    dragClientPos = null;
+    velocity.x = 0;
+    velocity.y = 0;
+    dragYawSign = getStableYawDragSign();
     previousMousePosition = { x: clientX, y: clientY };
     onPointerMove(event);
 }
 
 function endCardPointer(event) {
     suppressNextCardClick = isDragging;
+    if (isDragging) {
+        velocity.x *= RELEASE_VELOCITY_SCALE;
+        velocity.y *= RELEASE_VELOCITY_SCALE;
+    }
     pointerDownPos = null;
-    dragClientPos = null;
     isDragging = false;
     updateProjectFramePerformance();
 }
@@ -1570,29 +1716,22 @@ function moveCardPointer(clientX, clientY, event) {
     const dy = clientY - pointerDownPos.y;
     if (!isDragging && (dx * dx + dy * dy) > DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
         isDragging = true;
+        velocity.x = 0;
+        velocity.y = 0;
+        dragYawSign = getStableYawDragSign();
+        previousMousePosition.x = clientX;
+        previousMousePosition.y = clientY;
         updateProjectFramePerformance();
     }
     if (!isDragging) {
         updateHover();
         return;
     }
-    dragClientPos = { x: clientX, y: clientY };
-}
-
-function applyDragRotationStep() {
-    if (!isDragging || !dragClientPos || !card) return;
-    const deltaX = dragClientPos.x - previousMousePosition.x;
-    const deltaY = dragClientPos.y - previousMousePosition.y;
-    if (!deltaX && !deltaY) return;
-    const rotDx = deltaX * ROTATION_SENSITIVITY;
-    const rotDy = -deltaY * ROTATION_SENSITIVITY;
-    rotation.y += rotDx;
-    rotation.x += rotDy;
-    rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
-    velocity.y = rotDx;
-    velocity.x = rotDy;
-    previousMousePosition.x = dragClientPos.x;
-    previousMousePosition.y = dragClientPos.y;
+    const deltaX = clientX - previousMousePosition.x;
+    const deltaY = clientY - previousMousePosition.y;
+    applyCardRotationDelta(deltaX, deltaY);
+    previousMousePosition.x = clientX;
+    previousMousePosition.y = clientY;
 }
 
 document.addEventListener('mousedown', (e) => {
@@ -1632,9 +1771,10 @@ function openProjectExternalLink(item) {
     window.open(href, '_blank', 'noopener,noreferrer');
 }
 
-function openProjectWriteUp(item) {
-    if (!item?.writeUpUrl) return;
-    window.open(item.writeUpUrl, '_blank', 'noopener,noreferrer');
+function openProjectFooterLink(item) {
+    const href = buildProjectDetailFooter(item).link?.href;
+    if (!href) return;
+    window.open(href, '_blank', 'noopener,noreferrer');
 }
 
 function tryBackProjectDetailLayoutTap(hits) {
@@ -1643,9 +1783,7 @@ function tryBackProjectDetailLayoutTap(hits) {
     if (!layout) return false;
     const pad = BACK_HOME_HIT_PAD;
 
-    const backLink = projectIndexLayout.backLink;
-    if (layout.x >= backLink.x - pad && layout.x <= backLink.x + backLink.w + pad
-        && layout.y >= backLink.y - pad && layout.y <= backLink.y + backLink.h + pad) {
+    if (hitTestBackLinkDetailAtLayout(layout.x, layout.y, pad)) {
         backLinkHoverUniform.value = 1;
         setTimeout(() => { backLinkHoverUniform.value = 0; }, 250);
         closeProjectDetail();
@@ -1661,10 +1799,10 @@ function tryBackProjectDetailLayoutTap(hits) {
         return true;
     }
 
-    if (hitTestProjectWriteUpAtLayout(layout.x, layout.y, activeProjectItem, pad)) {
-        projectDetailWriteUpHoverUniforms[activeProjectIndex].value = 1;
-        setTimeout(() => { projectDetailWriteUpHoverUniforms[activeProjectIndex].value = 0; }, 250);
-        openProjectWriteUp(activeProjectItem);
+    if (hitTestProjectFooterLinkAtLayout(layout.x, layout.y, activeProjectItem, pad)) {
+        projectDetailFooterLinkHoverUniforms[activeProjectIndex].value = 1;
+        setTimeout(() => { projectDetailFooterLinkHoverUniforms[activeProjectIndex].value = 0; }, 250);
+        openProjectFooterLink(activeProjectItem);
         return true;
     }
     return false;
@@ -1675,9 +1813,7 @@ function tryBackProjectsLayoutTap(hits) {
     if (!layout) return false;
     const pad = BACK_HOME_HIT_PAD;
 
-    const backLink = projectIndexLayout.backLink;
-    if (layout.x >= backLink.x - pad && layout.x <= backLink.x + backLink.w + pad
-        && layout.y >= backLink.y - pad && layout.y <= backLink.y + backLink.h + pad) {
+    if (hitTestBackLinkListAtLayout(layout.x, layout.y, pad)) {
         backLinkHoverUniform.value = 1;
         setTimeout(() => { backLinkHoverUniform.value = 0; }, 250);
         closeBackProjectsIndex();
@@ -1740,6 +1876,17 @@ function tryBackInteraction() {
             closeProjectDetail();
             return true;
         }
+
+        const footerLinkHit = hits.find((hit) => hit.object.userData.isHoverPlane
+            && hit.object.userData.kind === 'projectFooterLink'
+            && hit.object.userData.projectIndex === activeProjectIndex);
+        if (footerLinkHit && activeProjectItem) {
+            projectDetailFooterLinkHoverUniforms[activeProjectIndex].value = 1;
+            setTimeout(() => { projectDetailFooterLinkHoverUniforms[activeProjectIndex].value = 0; }, 250);
+            openProjectFooterLink(activeProjectItem);
+            return true;
+        }
+
         if (tryBackProjectDetailLayoutTap(hits)) return true;
         return false;
     }
@@ -2693,7 +2840,6 @@ function animate() {
         initCard();
     }
     if (card) {
-        applyDragRotationStep();
         updateProjectFramePerformance();
         updateCardSurfaceQuality();
 
@@ -2720,10 +2866,10 @@ function animate() {
                 const u = projectDetailTitleHoverUniforms[ti];
                 u.value += (titleTarget - u.value) * HOVER_LERP;
             }
-            for (let wi = 0; wi < projectDetailWriteUpHoverUniforms.length; wi++) {
-                const writeUpTarget = hoveringProjectWriteUp && wi === activeProjectIndex ? 1 : 0;
-                const u = projectDetailWriteUpHoverUniforms[wi];
-                u.value += (writeUpTarget - u.value) * HOVER_LERP;
+            for (let fi = 0; fi < projectDetailFooterLinkHoverUniforms.length; fi++) {
+                const footerLinkTarget = hoveringProjectFooterLink && fi === activeProjectIndex ? 1 : 0;
+                const u = projectDetailFooterLinkHoverUniforms[fi];
+                u.value += (footerLinkTarget - u.value) * HOVER_LERP;
             }
             const backLinkTarget = hoveringBackLink ? 1 : 0;
             backLinkHoverUniform.value += (backLinkTarget - backLinkHoverUniform.value) * HOVER_LERP;
@@ -2734,15 +2880,7 @@ function animate() {
         updateBackFaceTextMask();
         if (!isDragging) updateBackHoverPlaneVisibility();
 
-        if (!isDragging) {
-            rotation.y += velocity.y;
-            rotation.x += velocity.x;
-            rotation.x = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, rotation.x));
-            velocity.y *= DAMPING;
-            velocity.x *= DAMPING;
-        }
-        card.rotation.x = rotation.x;
-        card.rotation.y = rotation.y;
+        updateCardRotationPhysics(delta);
         card.position.y = 0;
         card.updateMatrixWorld();
         updateProjectFrameOverlay();

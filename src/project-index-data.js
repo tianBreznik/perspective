@@ -31,6 +31,7 @@ export const PROJECT_INDEX_ITEMS = [
         description: 'A browser installation for Unfamiliar Area, Galerija Alkatraz: a speculative page that reinstates the deprecated HTML blink tag as live infrastructure. On every reload the DOM is rebuilt from scraped feeds; blink cadence and source material shift with the network. Page and viewer stare back at each other, updating the same systems together.',
         url: 'https://blink.tian.ana.help',
         writeUpUrl: 'https://galerijalkatraz.org/?p=20186',
+        writeUpLabel: 'Galerija Alkatraz',
     },
     {
         slug: 'garden-painting',
@@ -55,22 +56,49 @@ export const PROJECT_INDEX_ITEMS = [
     },
 ];
 
-/** Footer list order: year → medium → context → with … → for … */
-export function getProjectDetailMetaList(item) {
-    const rows = [];
+/** Side margins — title, body, and footer share one vertical axis. */
+export const PROJECT_DETAIL_SIDE_MARGIN = 0.14;
+
+function linkHostLabel(url) {
+    try {
+        return new URL(url).hostname.replace(/^www\./, '');
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Portfolio-style footer: link (left) · category (center) · year (right).
+ * Credits sit in a small line just above the footer row.
+ * Footer link opens writeUpUrl when set, otherwise item.url.
+ */
+export function buildProjectDetailFooter(item) {
     const m = item.meta;
+    let link = null;
+    if (item.writeUpUrl) {
+        link = {
+            text: item.writeUpLabel || linkHostLabel(item.writeUpUrl),
+            href: item.writeUpUrl,
+        };
+    } else if (item.url) {
+        const text = linkHostLabel(item.url);
+        if (text) link = { text, href: item.url };
+    }
+    let category = null;
+    let year = null;
     if (m && typeof m === 'object' && !Array.isArray(m)) {
-        if (m.year) rows.push(String(m.year));
-        if (m.medium) rows.push(m.medium);
-        if (m.context) rows.push(m.context);
-    } else if (Array.isArray(item.meta)) {
-        for (const row of item.meta) {
-            if (row) rows.push(row);
+        category = m.context || m.medium || null;
+        if (m.year) year = String(m.year);
+    } else if (Array.isArray(item.meta) && item.meta.length) {
+        category = item.meta[item.meta.length - 1] || null;
+        if (item.meta[0] && /^\d{4}$/.test(String(item.meta[0]))) {
+            year = String(item.meta[0]);
         }
     }
-    if (item.collaborator) rows.push(`with ${item.collaborator}`);
-    if (item.commission) rows.push(`for ${item.commission}`);
-    return rows;
+    const credits = [];
+    if (item.collaborator) credits.push(`With ${item.collaborator}`);
+    if (item.commission) credits.push(`For ${item.commission}`);
+    return { link, category, year, credits };
 }
 
 export function projectTextureUrl(slug, name) {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
-import { getProjectDetailMetaList } from '../project-index-data.js';
+import { buildProjectDetailFooter, PROJECT_DETAIL_SIDE_MARGIN } from '../project-index-data.js';
 
 export const BAKE_TEXTURE_SIZE = 1024;
 export const BAKE_CURVE_SEGMENTS = 64;
@@ -11,21 +11,52 @@ export const CARD_WIDTH = 4;
 export const CARD_HEIGHT = 2.5;
 
 export const BACK_LINK_LABEL = 'back';
+export const BACK_LINK_LIST_LABEL = '↢';
 export const BACK_LINK_SIZE = 0.13 * 0.82;
+
+export function measureBackListArrow(size = BACK_LINK_SIZE) {
+    const w = size * 1.36;
+    const h = size * 0.66;
+    return { w, h, ascent: h, descent: 0 };
+}
+
+export function addBackListArrowMesh(scene, x, y, size, inkMat) {
+    const { w, h } = measureBackListArrow(size);
+    const stroke = size * 0.105;
+    const shaftY = y + stroke * 0.42;
+    const headLen = w * 0.27;
+    const shaftLen = w - headLen - stroke * 0.15;
+    const headSpread = stroke * 1.55;
+
+    const headShape = new THREE.Shape();
+    headShape.moveTo(x, shaftY + stroke / 2);
+    headShape.lineTo(x + headLen, shaftY + stroke / 2 + headSpread);
+    headShape.lineTo(x + headLen, shaftY + stroke / 2 - headSpread);
+    headShape.closePath();
+    scene.add(new THREE.Mesh(new THREE.ShapeGeometry(headShape), inkMat));
+
+    const shaft = new THREE.Mesh(new THREE.PlaneGeometry(shaftLen, stroke), inkMat);
+    shaft.position.set(x + headLen + shaftLen / 2, shaftY + stroke / 2, 0);
+    scene.add(shaft);
+
+    const tailH = size * 0.3;
+    const tail = new THREE.Mesh(new THREE.PlaneGeometry(stroke * 0.9, tailH), inkMat);
+    tail.position.set(x + headLen + shaftLen, shaftY + stroke / 2 + tailH / 2, 0);
+    scene.add(tail);
+}
 export const PROJECT_INDEX_SIZE = 0.13 * 0.82;
 
-export const PROJECT_DETAIL_TITLE_SIZE = PROJECT_INDEX_SIZE;
+export const PROJECT_DETAIL_TITLE_SIZE = PROJECT_INDEX_SIZE * 1.04;
 export const PROJECT_DETAIL_TOP_MARGIN = 0.2;
-export const PROJECT_DETAIL_TITLE_DESC_GAP = 0.14;
-export const PROJECT_DETAIL_DESC_SIZE = 0.13 * 0.62;
-export const PROJECT_DETAIL_DESC_MAX_W = CARD_WIDTH - 0.36;
-export const PROJECT_DETAIL_DESC_LINE_GAP = 0.065;
-export const PROJECT_DETAIL_DESC_BOTTOM_MARGIN = 0.22;
-export const PROJECT_DETAIL_META_SIZE = PROJECT_DETAIL_DESC_SIZE * 0.88;
-export const PROJECT_DETAIL_META_LEFT = -CARD_WIDTH / 2 + 0.14;
-export const PROJECT_DETAIL_META_BOTTOM = -CARD_HEIGHT / 2 + 0.14;
-export const PROJECT_DETAIL_META_GAP = 0.045;
-export const PROJECT_DETAIL_META_DESC_GAP = 0.08;
+export const PROJECT_DETAIL_TITLE_DESC_GAP = 0.11;
+export const PROJECT_DETAIL_DESC_SIZE = 0.13 * 0.58;
+export const PROJECT_DETAIL_DESC_MAX_W = CARD_WIDTH - PROJECT_DETAIL_SIDE_MARGIN * 2;
+export const PROJECT_DETAIL_DESC_LINE_GAP = 0.072;
+export const PROJECT_DETAIL_META_FOOTER_SIZE = 0.13 * 0.48;
+export const PROJECT_DETAIL_META_CREDIT_SIZE = 0.13 * 0.44;
+export const PROJECT_DETAIL_META_FOOTER_BOTTOM = -CARD_HEIGHT / 2 + 0.13;
+export const PROJECT_DETAIL_META_CREDIT_FOOTER_GAP = 0.038;
+export const PROJECT_DETAIL_META_DESC_GAP = 0.1;
 export const PROJECT_INDEX_GAP = 0.24;
 
 export function measureTextLabel(text, size, font, curveSegments = BAKE_CURVE_SEGMENTS) {
@@ -60,7 +91,7 @@ export function getProjectDetailTitleLayout(item, font, curveSegments) {
     const metrics = measureTextLabel(item.title, PROJECT_DETAIL_TITLE_SIZE, font, curveSegments);
     return {
         ...metrics,
-        x: -metrics.w / 2,
+        x: -CARD_WIDTH / 2 + PROJECT_DETAIL_SIDE_MARGIN,
         y: CARD_HEIGHT / 2 - PROJECT_DETAIL_TOP_MARGIN - metrics.h,
     };
 }
@@ -70,17 +101,17 @@ export function getProjectDetailDescriptionLayout(item, font, curveSegments) {
     const titleLayout = getProjectDetailTitleLayout(item, font, curveSegments);
     const lines = wrapTextLines(item.description, PROJECT_DETAIL_DESC_SIZE, PROJECT_DETAIL_DESC_MAX_W, font, curveSegments);
     const metaLayout = getProjectDetailMetaLayout(item, font, curveSegments);
-    let minLineBottom = -CARD_HEIGHT / 2 + PROJECT_DETAIL_DESC_BOTTOM_MARGIN;
-    if (metaLayout) {
-        minLineBottom = Math.max(minLineBottom, metaLayout.top + PROJECT_DETAIL_META_DESC_GAP);
-    }
+    const minLineBottom = metaLayout
+        ? metaLayout.top + PROJECT_DETAIL_META_DESC_GAP
+        : PROJECT_DETAIL_META_FOOTER_BOTTOM + PROJECT_DETAIL_META_DESC_GAP;
     let lineY = titleLayout.y - PROJECT_DETAIL_TITLE_DESC_GAP;
     const lineLayouts = [];
+    const descLeft = -CARD_WIDTH / 2 + PROJECT_DETAIL_SIDE_MARGIN;
     for (const line of lines) {
         const m = measureTextLabel(line, PROJECT_DETAIL_DESC_SIZE, font, curveSegments);
         lineY -= m.h;
         if (lineY < minLineBottom) break;
-        lineLayouts.push({ line, x: -m.w / 2, y: lineY, w: m.w, h: m.h });
+        lineLayouts.push({ line, x: descLeft, y: lineY, w: m.w, h: m.h });
         lineY -= PROJECT_DETAIL_DESC_LINE_GAP;
     }
     if (lineLayouts.length === 0) return null;
@@ -92,25 +123,85 @@ export function getProjectDetailDescriptionLayout(item, font, curveSegments) {
 }
 
 export function getProjectDetailMetaLayout(item, font, curveSegments) {
-    const rows = getProjectDetailMetaList(item);
-    if (!rows.length) return null;
-    let y = PROJECT_DETAIL_META_BOTTOM;
+    const footer = buildProjectDetailFooter(item);
+    const hasFooter = footer.link || footer.category || footer.year;
+    const hasCredits = footer.credits.length > 0;
+    if (!hasFooter && !hasCredits) return null;
+
     const lines = [];
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const row of rows) {
-        const m = measureTextLabel(row, PROJECT_DETAIL_META_SIZE, font, curveSegments);
-        const line = { line: row, x: PROJECT_DETAIL_META_LEFT, y, w: m.w, h: m.h };
-        lines.push(line);
-        minX = Math.min(minX, line.x);
-        minY = Math.min(minY, line.y);
-        maxX = Math.max(maxX, line.x + line.w);
-        maxY = Math.max(maxY, line.y + line.h);
-        y += m.h + PROJECT_DETAIL_META_GAP;
+    const leftX = -CARD_WIDTH / 2 + PROJECT_DETAIL_SIDE_MARGIN;
+    const rightX = CARD_WIDTH / 2 - PROJECT_DETAIL_SIDE_MARGIN;
+    const footerY = PROJECT_DETAIL_META_FOOTER_BOTTOM;
+    const footerSize = PROJECT_DETAIL_META_FOOTER_SIZE;
+    const footerLineH = hasFooter
+        ? measureTextLabel('Ag', footerSize, font, curveSegments).h
+        : 0;
+
+    if (hasFooter) {
+        if (footer.link) {
+            const m = measureTextLabel(footer.link.text, footerSize, font, curveSegments);
+            lines.push({
+                line: footer.link.text,
+                x: leftX,
+                y: footerY,
+                w: m.w,
+                h: m.h,
+                size: footerSize,
+                role: 'footer-link',
+            });
+        }
+        if (footer.category) {
+            const m = measureTextLabel(footer.category, footerSize, font, curveSegments);
+            lines.push({ line: footer.category, x: -m.w / 2, y: footerY, w: m.w, h: m.h, size: footerSize });
+        }
+        if (footer.year) {
+            const m = measureTextLabel(footer.year, footerSize, font, curveSegments);
+            lines.push({ line: footer.year, x: rightX - m.w, y: footerY, w: m.w, h: m.h, size: footerSize });
+        }
     }
-    return { lines, x: minX, y: minY, w: maxX - minX, h: maxY - minY, top: maxY };
+
+    if (hasCredits) {
+        const creditSize = PROJECT_DETAIL_META_CREDIT_SIZE;
+        const creditText = footer.credits.join(' · ');
+        const creditM = measureTextLabel(creditText, creditSize, font, curveSegments);
+        const creditMaxW = CARD_WIDTH - PROJECT_DETAIL_SIDE_MARGIN * 2;
+        let creditY = footerY + footerLineH + PROJECT_DETAIL_META_CREDIT_FOOTER_GAP;
+
+        if (creditM.w <= creditMaxW) {
+            lines.push({
+                line: creditText,
+                x: leftX,
+                y: creditY,
+                w: creditM.w,
+                h: creditM.h,
+                size: creditSize,
+            });
+        } else {
+            for (const credit of footer.credits) {
+                const m = measureTextLabel(credit, creditSize, font, curveSegments);
+                creditY += m.h;
+                lines.push({ line: credit, x: leftX, y: creditY, w: m.w, h: m.h, size: creditSize });
+                creditY += PROJECT_DETAIL_META_CREDIT_FOOTER_GAP * 0.6;
+            }
+        }
+    }
+
+    const minX = Math.min(...lines.map((line) => line.x));
+    const minY = Math.min(...lines.map((line) => line.y));
+    const maxX = Math.max(...lines.map((line) => line.x + line.w));
+    const maxY = Math.max(...lines.map((line) => line.y + line.h));
+
+    const linkLine = lines.find((line) => line.role === 'footer-link');
+
+    return {
+        lines,
+        linkLayout: linkLine ? { x: linkLine.x, y: linkLine.y, w: linkLine.w, h: linkLine.h } : null,
+        x: minX,
+        y: minY,
+        w: maxX - minX,
+        h: maxY - minY,
+        top: maxY,
+    };
 }
 
 export function buildProjectIndexLayout(items, font, curveSegments) {
@@ -131,14 +222,24 @@ export function buildProjectIndexLayout(items, font, curveSegments) {
         }
         return entry;
     });
-    const backMetrics = measureTextLabel(BACK_LINK_LABEL, BACK_LINK_SIZE, font, curveSegments);
+    const arrowMetrics = measureBackListArrow(BACK_LINK_SIZE);
+    const last = entries[entries.length - 1];
+    const lastMidY = last.y + (last.ascent - last.descent) / 2;
     const backLink = {
-        label: BACK_LINK_LABEL,
-        ...backMetrics,
-        x: -CARD_WIDTH / 2 + 0.12,
-        y: CARD_HEIGHT / 2 - 0.12 - backMetrics.h,
+        label: BACK_LINK_LIST_LABEL,
+        isArrow: true,
+        ...arrowMetrics,
+        x: -CARD_WIDTH / 2 + PROJECT_DETAIL_SIDE_MARGIN,
+        y: lastMidY - arrowMetrics.h / 2,
     };
-    return { entries, backLink };
+    const backDetailMetrics = measureTextLabel(BACK_LINK_LABEL, BACK_LINK_SIZE, font, curveSegments);
+    const backLinkDetail = {
+        label: BACK_LINK_LABEL,
+        ...backDetailMetrics,
+        x: CARD_WIDTH / 2 - PROJECT_DETAIL_SIDE_MARGIN - backDetailMetrics.w,
+        y: CARD_HEIGHT / 2 - PROJECT_DETAIL_TOP_MARGIN - backDetailMetrics.h,
+    };
+    return { entries, backLink, backLinkDetail };
 }
 
 function createOrthoScene(worldW, worldH) {
@@ -297,11 +398,11 @@ export function renderProjectDetailTarget(renderer, font, item, projectIndexLayo
     const metaLayout = getProjectDetailMetaLayout(item, font, curveSegments);
     if (metaLayout) {
         for (const line of metaLayout.lines) {
-            addTextMesh(orthoScene, line.line, PROJECT_DETAIL_META_SIZE, line.x, line.y, font, curveSegments, inkMat);
+            addTextMesh(orthoScene, line.line, line.size, line.x, line.y, font, curveSegments, inkMat);
         }
     }
 
-    const back = projectIndexLayout.backLink;
+    const back = projectIndexLayout.backLinkDetail;
     addTextMesh(orthoScene, back.label, BACK_LINK_SIZE, back.x, back.y, font, curveSegments, inkMat);
 
     return renderSceneToTarget(renderer, orthoScene, orthoCamera, CARD_WIDTH, CARD_HEIGHT, BAKE_TEXTURE_SIZE);
@@ -315,14 +416,13 @@ export function renderTitleMaskTarget(renderer, font, item, curveSegments = BAKE
     return renderSceneToTarget(renderer, orthoScene, orthoCamera, CARD_WIDTH, CARD_HEIGHT, BAKE_TEXTURE_SIZE);
 }
 
-export function renderDescMaskTarget(renderer, font, item, curveSegments = BAKE_CURVE_SEGMENTS) {
-    const descLayout = getProjectDetailDescriptionLayout(item, font, curveSegments);
-    if (!descLayout) return null;
+export function renderFooterLinkMaskTarget(renderer, font, item, curveSegments = BAKE_CURVE_SEGMENTS) {
+    const metaLayout = getProjectDetailMetaLayout(item, font, curveSegments);
+    const linkLine = metaLayout?.lines.find((line) => line.role === 'footer-link');
+    if (!linkLine) return null;
     const { orthoScene, orthoCamera } = createOrthoScene(CARD_WIDTH, CARD_HEIGHT);
     const inkMat = new THREE.MeshBasicMaterial({ color: 0x000000, depthTest: true, depthWrite: true });
-    for (const line of descLayout.lines) {
-        addTextMesh(orthoScene, line.line, PROJECT_DETAIL_DESC_SIZE, line.x, line.y, font, curveSegments, inkMat);
-    }
+    addTextMesh(orthoScene, linkLine.line, linkLine.size, linkLine.x, linkLine.y, font, curveSegments, inkMat);
     return renderSceneToTarget(renderer, orthoScene, orthoCamera, CARD_WIDTH, CARD_HEIGHT, BAKE_TEXTURE_SIZE);
 }
 

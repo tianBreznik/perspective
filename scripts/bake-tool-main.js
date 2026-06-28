@@ -8,11 +8,11 @@ import inriaSerifFont from '../src/assets/fonts/Baskervville Medium_Regular.json
 import baskervvilleRegular from '../src/assets/fonts/Baskervville_Regular.json';
 import { buildCardFaceLayout } from '../src/card-face-layout.js';
 import { listCardFaceBakeJobs, renderCardFaceTarget } from '../src/bake/card-face-render.js';
-import { PROJECT_INDEX_ITEMS } from '../src/project-index-data.js';
+import { buildProjectDetailFooter, PROJECT_INDEX_ITEMS } from '../src/project-index-data.js';
 import {
     buildProjectIndexLayout,
     readRenderTargetPixels,
-    renderDescMaskTarget,
+    renderFooterLinkMaskTarget,
     renderProjectDetailTarget,
     renderTitleMaskTarget,
 } from '../src/bake/project-detail-render.js';
@@ -69,7 +69,7 @@ async function runBake() {
     const cardJobs = listCardFaceBakeJobs(cardFaceLayout, PROJECT_INDEX_ITEMS);
     const projectItems = PROJECT_INDEX_ITEMS.filter((item) => item.url);
     const totalSteps = cardJobs.length + projectItems.reduce(
-        (sum, item) => sum + 2 + (item.writeUpUrl && item.description ? 1 : 0),
+        (sum, item) => sum + 2 + (buildProjectDetailFooter(item).link ? 1 : 0),
         0,
     );
     let step = 0;
@@ -115,17 +115,17 @@ async function runBake() {
             ...bakeTarget(renderer, renderTitleMaskTarget(renderer, backButtonFont, item)),
         });
 
-        if (item.writeUpUrl && item.description) {
-            const descTarget = renderDescMaskTarget(renderer, backButtonFont, item);
-            if (descTarget) {
+        if (buildProjectDetailFooter(item).link) {
+            const footerLinkTarget = renderFooterLinkMaskTarget(renderer, backButtonFont, item);
+            if (footerLinkTarget) {
                 await yieldToBrowser();
                 step += 1;
-                setStatus(`Baking ${item.slug} desc-mask (${step}/${totalSteps})…`);
+                setStatus(`Baking ${item.slug} footer-link-mask (${step}/${totalSteps})…`);
                 baked.push({
                     group: 'project',
                     slug: item.slug,
-                    name: 'desc-mask',
-                    ...bakeTarget(renderer, descTarget),
+                    name: 'footer-link-mask',
+                    ...bakeTarget(renderer, footerLinkTarget),
                 });
             }
         }

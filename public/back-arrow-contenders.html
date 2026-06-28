@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Back arrow contenders</title>
+    <link href="https://fonts.googleapis.com/css2?family=Baskervville:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 1.5rem;
+            font-family: system-ui, sans-serif;
+            background: #f0f0f0;
+            color: #111;
+        }
+        h1 { font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem; }
+        p.note { font-size: 0.85rem; color: #555; margin: 0 0 1.25rem; max-width: 42rem; line-height: 1.45; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+        .option {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .option header {
+            padding: 0.6rem 0.85rem;
+            border-bottom: 1px solid #eee;
+            font-size: 0.78rem;
+            color: #666;
+        }
+        .option header strong { color: #111; font-weight: 600; }
+        .card-mock {
+            position: relative;
+            margin: 1rem;
+            aspect-ratio: 4 / 2.5;
+            background: #fafafa;
+            border: 1px solid #e8e8e8;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.6);
+        }
+        .card-mock::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(145deg, rgba(0,0,0,0.02), transparent 40%);
+            pointer-events: none;
+        }
+        .project-list {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.55rem;
+            padding: 1.4rem 1rem 2.2rem;
+            font-family: 'Baskervville', Georgia, 'Times New Roman', serif;
+            font-size: clamp(0.72rem, 2.8vw, 0.88rem);
+            line-height: 1;
+            color: #111;
+        }
+        .project-list span { opacity: 0.35; }
+        .project-list span:last-of-type { opacity: 1; }
+        .back-arrow {
+            position: absolute;
+            left: 8%;
+            bottom: 10%;
+            font-family: 'Baskervville', Georgia, 'Times New Roman', serif;
+            font-size: clamp(0.85rem, 3.2vw, 1.05rem);
+            line-height: 1;
+            color: #111;
+            letter-spacing: 0;
+        }
+        .back-arrow.wide { letter-spacing: 0.06em; }
+        .back-arrow.large { font-size: clamp(1rem, 3.8vw, 1.25rem); }
+        .glyph { font-family: ui-monospace, monospace; font-size: 0.7em; opacity: 0.7; }
+    </style>
+</head>
+<body>
+    <h1>Back control contenders — project list page</h1>
+    <p class="note">
+        Rendered in Baskervville (card back face). Each mock shows the arrow bottom-left,
+        aligned with the last list item — where “back” sits today. Pick a number and tell me which to ship.
+    </p>
+
+    <div class="grid">
+        <section class="option">
+            <header><strong>1</strong> · Simple arrow <span class="glyph">U+2190</span></header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow">←</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>2</strong> · Long arrow <span class="glyph">U+27F5</span></header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow">⟵</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>3</strong> · Guillemet <span class="glyph">U+2039</span> — editorial</header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow large">‹</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>4</strong> · Double guillemet <span class="glyph">U+00AB</span></header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow">«</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>5</strong> · Arrow with tail <span class="glyph">U+21A2</span></header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow">↢</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>6</strong> · Harpoon left <span class="glyph">U+21BC</span></header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow">↼</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>7</strong> · Angle bracket <span class="glyph">U+3008</span></header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow large">〈</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>8</strong> · Mathematical angle <span class="glyph">U+27E8</span></header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow large">⟨</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>9</strong> · Em dash + arrow</header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow wide">—←</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>10</strong> · Long em + arrow</header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow wide">——←</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>11</strong> · Italic guillemet</header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow large" style="font-style: italic;">‹</div>
+            </div>
+        </section>
+
+        <section class="option">
+            <header><strong>12</strong> · Current (reference)</header>
+            <div class="card-mock">
+                <div class="project-list">
+                    <span>Good People Posting</span>
+                    <span>weirdattachments.online</span>
+                    <span>…</span>
+                    <span>twitter fatigue</span>
+                </div>
+                <div class="back-arrow">back</div>
+            </div>
+        </section>
+    </div>
+</body>
+</html>

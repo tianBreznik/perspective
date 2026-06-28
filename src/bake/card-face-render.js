@@ -9,6 +9,7 @@ import {
     BACK_BUTTON_SIZE,
 } from '../card-face-layout.js';
 import {
+    addBackListArrowMesh,
     BAKE_CURVE_SEGMENTS,
     BAKE_TEXTURE_SIZE,
     CARD_HEIGHT,
@@ -85,13 +86,7 @@ export function renderBackProjectsTarget(renderer, layout, backButtonFont, curve
         }, textMat, curveSegments);
     }
     const back = layout.projectIndexLayout.backLink;
-    addTextItem(orthoScene, {
-        text: back.label,
-        font: backButtonFont,
-        size: layout.BACK_LINK_SIZE,
-        x: back.x,
-        y: back.y,
-    }, textMat, curveSegments);
+    addBackListArrowMesh(orthoScene, back.x, back.y, layout.BACK_LINK_SIZE, textMat);
     return renderMaskTarget(renderer, orthoScene, orthoCamera);
 }
 
@@ -128,7 +123,15 @@ export function renderProjectIndexEntryMaskTarget(renderer, layout, backButtonFo
 }
 
 export function renderBackLinkMaskTarget(renderer, layout, backButtonFont, curveSegments = BAKE_CURVE_SEGMENTS) {
+    const { orthoScene, orthoCamera } = createOrthoScene(CARD_WIDTH, CARD_HEIGHT);
+    const textMat = new THREE.MeshBasicMaterial({ color: 0x000000, depthTest: true, depthWrite: true });
     const back = layout.projectIndexLayout.backLink;
+    addBackListArrowMesh(orthoScene, back.x, back.y, layout.BACK_LINK_SIZE, textMat);
+    return renderMaskTarget(renderer, orthoScene, orthoCamera);
+}
+
+export function renderBackLinkDetailMaskTarget(renderer, layout, backButtonFont, curveSegments = BAKE_CURVE_SEGMENTS) {
+    const back = layout.projectIndexLayout.backLinkDetail;
     return renderTextItemsTarget(renderer, [{
         text: back.label,
         font: backButtonFont,
@@ -145,6 +148,7 @@ export function listCardFaceBakeJobs(layout, indexItems) {
         { name: 'email-mask' },
         ...BACK_BUTTON_LABELS.map((label) => ({ name: `button-${label.toLowerCase()}-mask` })),
         { name: 'back-link-mask' },
+        { name: 'back-link-detail-mask' },
         ...indexItems.map((item) => ({ name: `index-${item.slug}-mask`, slug: item.slug })),
     ];
     return jobs;
@@ -162,6 +166,9 @@ export function renderCardFaceTarget(renderer, layout, baskervvilleFont, backBut
     }
     if (job.name === 'back-link-mask') {
         return renderBackLinkMaskTarget(renderer, layout, backButtonFont, curveSegments);
+    }
+    if (job.name === 'back-link-detail-mask') {
+        return renderBackLinkDetailMaskTarget(renderer, layout, backButtonFont, curveSegments);
     }
     if (job.name.startsWith('button-') && job.name.endsWith('-mask')) {
         const label = job.name.slice('button-'.length, -'-mask'.length);

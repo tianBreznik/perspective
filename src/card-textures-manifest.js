@@ -11,6 +11,7 @@ export const CARD_TEXTURE_KEYS = [
     'email-mask',
     ...CARD_BUTTON_TEXTURE_KEYS,
     'back-link-mask',
+    'back-link-detail-mask',
     ...PROJECT_INDEX_ITEMS.map((item) => `index-${item.slug}-mask`),
 ];
 
