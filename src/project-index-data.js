@@ -32,6 +32,14 @@ export const PROJECT_INDEX_ITEMS = [
         url: 'https://sites.gold.ac.uk/ma-mfa-computationalarts/tian-breznik/',
     },
     {
+        slug: 'luisa',
+        title: 'LUISA',
+        meta: { year: '2024', medium: 'installation', context: 'screen + chatbot' },
+        collaborator: 'Fantamagico',
+        description: 'A screen-based installation and AI chatbot: Luisa was born inside a screen. You cannot hug her, but you can write to her on Telegram, send images that briefly remake her world and dress, and receive selfies in return. Procedurally animated in Unity, she never repeats the same gesture. Built as a prompt-crafting experiment around ChatGPT jailbreaking, her traits draw from essays, scripts and novels on screen addiction. Through those limits, visitors are invited into a collective healing process — helping Luisa, and maybe themselves.',
+        url: 'https://fantamagico.itch.io/luisa',
+    },
+    {
         slug: 'blink-a-link',
         title: 'blink-a-link',
         meta: { year: '2024', medium: 'web', context: 'Alkatraz Gallery' },
