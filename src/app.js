@@ -2080,8 +2080,9 @@ function moveCardPointer(clientX, clientY, event) {
     const deltaX = clientX - previousMousePosition.x;
     const deltaY = clientY - previousMousePosition.y;
     if (isProjectsListScrolling) {
-        // Finger / drag follows content: drag down → list moves down.
-        scrollProjectsListBy(deltaY * 0.0045);
+        // Touch/drag: finger up reveals lower titles (native mobile scroll feel).
+        // Opposite of wheel, which uses +deltaY for desktop.
+        scrollProjectsListBy(-deltaY * 0.0045);
         previousMousePosition.x = clientX;
         previousMousePosition.y = clientY;
         updateHover();
