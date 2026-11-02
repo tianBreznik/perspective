@@ -8,6 +8,7 @@ export const CARD_BUTTON_TEXTURE_KEYS = BACK_BUTTON_LABELS.map(
 export const CARD_TEXTURE_KEYS = [
     'back-home',
     'back-projects',
+    'back-projects-list',
     'email-mask',
     ...CARD_BUTTON_TEXTURE_KEYS,
     'back-link-mask',

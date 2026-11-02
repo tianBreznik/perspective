@@ -1,11 +1,19 @@
 /** Single source of truth for project index / detail copy. Re-run bake after edits. */
 export const PROJECT_INDEX_ITEMS = [
     {
+        slug: 'anatomy-of-a-haunting',
+        title: 'Anatomy of a Haunting',
+        meta: { year: '2026', medium: 'physical', context: 'installation' },
+        commission: 'Maja Bojanić',
+        description: 'A physical installation at MSUM+ gallery as part of the DRAUGHT exhibition series in Ljubljana, Slovenia. The installation functions as a forum that gives voice to blurred figures, who had fallen victim to violent exclusionary processes in recent (Slovenian) history. The installation reappropriates disused debate microphones as the interaction surface.',
+        url: 'https://www.mg-lj.si/en/exhibitions/4442/draught-maja-bojanic-anatomy-of-a-haunting/',
+    },
+    {
         slug: 'good-people-posting',
         title: 'Good People Posting',
-        meta: { year: '2026', medium: 'web', context: 'community publishing' },
+        meta: { year: '2026', medium: 'web', context: 'community software' },
         collaborator: 'Silas Anker Saggau, PhD',
-        description: 'A blogspace for a community of writers outside algorithmic publishing. No feeds, no ranking: discussion stays on the page. Built on TipTap with custom ProseMirror blocks for long form writing, plus inline annotation and threaded comment layers so readers can respond to specific passages without leaving the text.',
+        description: 'A blogspace for a community of writers outside algorithmic publishing. No feeds, no ranking: discussion stays on the page. Built on TipTap with custom ProseMirror blocks for long form writing, plus inline annotation and threaded comment layers so readers can respond to specific passages without leaving the text. My own writing is also available here under the moniker of my own name "tian".',
         url: 'https://goodpeople.build',
     },
     {

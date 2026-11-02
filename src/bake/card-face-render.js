@@ -17,22 +17,23 @@ import {
     renderTextMaskScene,
 } from './project-detail-render.js';
 
-function createOrthoScene(worldW, worldH) {
+function createOrthoScene(worldW, worldH, centerY = 0) {
     const orthoScene = new THREE.Scene();
     orthoScene.background = new THREE.Color(1, 1, 1);
+    // Frustum is camera-local; world offset comes only from camera.position.y.
     const orthoCamera = new THREE.OrthographicCamera(
         -worldW / 2, worldW / 2,
         worldH / 2, -worldH / 2,
         0.1, 10,
     );
-    orthoCamera.position.z = 1;
-    orthoCamera.lookAt(0, 0, 0);
+    orthoCamera.position.set(0, centerY, 1);
+    orthoCamera.lookAt(0, centerY, 0);
     return { orthoScene, orthoCamera };
 }
 
-function renderMaskTarget(renderer, orthoScene, orthoCamera) {
+function renderMaskTarget(renderer, orthoScene, orthoCamera, worldW = CARD_WIDTH, worldH = CARD_HEIGHT) {
     const w = Math.round(BAKE_TEXTURE_SIZE);
-    const h = Math.round(BAKE_TEXTURE_SIZE * (CARD_HEIGHT / CARD_WIDTH));
+    const h = Math.round(BAKE_TEXTURE_SIZE * (worldH / worldW));
     return renderTextMaskScene(renderer, orthoScene, orthoCamera, w, h);
 }
 
@@ -68,14 +69,18 @@ function renderTextItemsTarget(renderer, textItems, curveSegments = BAKE_CURVE_S
     return renderMaskTarget(renderer, orthoScene, orthoCamera);
 }
 
-export function renderBackHomeTarget(renderer, layout, baskervvilleFont, backButtonFont, curveSegments = BAKE_CURVE_SEGMENTS) {
-    return renderTextItemsTarget(renderer, getBackHomeTextItems(layout, baskervvilleFont, backButtonFont), curveSegments);
+function getProjectsListBakeBounds(layout) {
+    const index = layout.projectIndexLayout;
+    const worldH = index.contentHeight;
+    const centerY = (index.contentTop + index.contentBottom) / 2;
+    return { worldH, centerY };
 }
 
-export function renderBackProjectsTarget(renderer, layout, backButtonFont, curveSegments = BAKE_CURVE_SEGMENTS) {
-    const { orthoScene, orthoCamera } = createOrthoScene(CARD_WIDTH, CARD_HEIGHT);
-    const textMat = new THREE.MeshBasicMaterial({ color: 0x000000, depthTest: true, depthWrite: true });
-    for (const entry of layout.projectIndexLayout.entries) {
+function addProjectIndexEntries(orthoScene, layout, backButtonFont, textMat, curveSegments, entryIndex = null) {
+    const entries = layout.projectIndexLayout.entries;
+    const range = entryIndex == null ? entries : [entries[entryIndex]];
+    for (const entry of range) {
+        if (!entry) continue;
         addTextItem(orthoScene, {
             text: entry.title,
             font: backButtonFont,
@@ -85,7 +90,39 @@ export function renderBackProjectsTarget(renderer, layout, backButtonFont, curve
             baseline: true,
         }, textMat, curveSegments);
     }
-    const back = layout.projectIndexLayout.backLink;
+}
+
+export function renderBackHomeTarget(renderer, layout, baskervvilleFont, backButtonFont, curveSegments = BAKE_CURVE_SEGMENTS) {
+    return renderTextItemsTarget(renderer, getBackHomeTextItems(layout, baskervvilleFont, backButtonFont), curveSegments);
+}
+
+export function renderBackProjectsListTarget(renderer, layout, backButtonFont, curveSegments = BAKE_CURVE_SEGMENTS) {
+    const { worldH, centerY } = getProjectsListBakeBounds(layout);
+    const { orthoScene, orthoCamera } = createOrthoScene(CARD_WIDTH, worldH, centerY);
+    const textMat = new THREE.MeshBasicMaterial({ color: 0x000000, depthTest: true, depthWrite: true });
+    addProjectIndexEntries(orthoScene, layout, backButtonFont, textMat, curveSegments);
+    return renderMaskTarget(renderer, orthoScene, orthoCamera, CARD_WIDTH, worldH);
+}
+
+export function renderBackProjectsTarget(renderer, layout, backButtonFont, curveSegments = BAKE_CURVE_SEGMENTS) {
+    // Card-sized scroll=0 snapshot (list clipped by camera + fixed back arrow).
+    const { orthoScene, orthoCamera } = createOrthoScene(CARD_WIDTH, CARD_HEIGHT);
+    const textMat = new THREE.MeshBasicMaterial({ color: 0x000000, depthTest: true, depthWrite: true });
+    const index = layout.projectIndexLayout;
+    for (const entry of index.entries) {
+        const top = entry.y + entry.ascent;
+        const bottom = entry.y - entry.descent;
+        if (bottom > index.viewportTop || top < index.viewportBottom) continue;
+        addTextItem(orthoScene, {
+            text: entry.title,
+            font: backButtonFont,
+            size: PROJECT_INDEX_SIZE,
+            x: entry.x,
+            y: entry.y,
+            baseline: true,
+        }, textMat, curveSegments);
+    }
+    const back = index.backLink;
     addBackListArrowMesh(orthoScene, back.x, back.y, layout.BACK_LINK_SIZE, textMat);
     return renderMaskTarget(renderer, orthoScene, orthoCamera);
 }
@@ -111,15 +148,11 @@ export function renderBackButtonMaskTarget(renderer, layout, backButtonFont, but
 }
 
 export function renderProjectIndexEntryMaskTarget(renderer, layout, backButtonFont, entryIndex, curveSegments = BAKE_CURVE_SEGMENTS) {
-    const entry = layout.projectIndexLayout.entries[entryIndex];
-    return renderTextItemsTarget(renderer, [{
-        text: entry.title,
-        font: backButtonFont,
-        size: PROJECT_INDEX_SIZE,
-        x: entry.x,
-        y: entry.y,
-        baseline: true,
-    }], curveSegments);
+    const { worldH, centerY } = getProjectsListBakeBounds(layout);
+    const { orthoScene, orthoCamera } = createOrthoScene(CARD_WIDTH, worldH, centerY);
+    const textMat = new THREE.MeshBasicMaterial({ color: 0x000000, depthTest: true, depthWrite: true });
+    addProjectIndexEntries(orthoScene, layout, backButtonFont, textMat, curveSegments, entryIndex);
+    return renderMaskTarget(renderer, orthoScene, orthoCamera, CARD_WIDTH, worldH);
 }
 
 export function renderBackLinkMaskTarget(renderer, layout, backButtonFont, curveSegments = BAKE_CURVE_SEGMENTS) {
@@ -145,6 +178,7 @@ export function listCardFaceBakeJobs(layout, indexItems) {
     const jobs = [
         { name: 'back-home' },
         { name: 'back-projects' },
+        { name: 'back-projects-list' },
         { name: 'email-mask' },
         ...BACK_BUTTON_LABELS.map((label) => ({ name: `button-${label.toLowerCase()}-mask` })),
         { name: 'back-link-mask' },
@@ -160,6 +194,9 @@ export function renderCardFaceTarget(renderer, layout, baskervvilleFont, backBut
     }
     if (job.name === 'back-projects') {
         return renderBackProjectsTarget(renderer, layout, backButtonFont, curveSegments);
+    }
+    if (job.name === 'back-projects-list') {
+        return renderBackProjectsListTarget(renderer, layout, backButtonFont, curveSegments);
     }
     if (job.name === 'email-mask') {
         return renderEmailMaskTarget(renderer, layout, baskervvilleFont, curveSegments);
@@ -177,9 +214,11 @@ export function renderCardFaceTarget(renderer, layout, baskervvilleFont, backBut
         return renderBackButtonMaskTarget(renderer, layout, backButtonFont, buttonIndex, curveSegments);
     }
     if (job.name.startsWith('index-') && job.name.endsWith('-mask')) {
-        const slug = job.name.slice('index-'.length, -'-mask'.length);
+        const slug = job.slug || job.name.slice('index-'.length, -'-mask'.length);
         const entryIndex = indexItems.findIndex((item) => item.slug === slug);
         if (entryIndex < 0) throw new Error(`Unknown index texture ${job.name}`);
+        const entry = layout.projectIndexLayout.entries[entryIndex];
+        if (!entry) throw new Error(`Missing layout entry for ${slug}`);
         return renderProjectIndexEntryMaskTarget(renderer, layout, backButtonFont, entryIndex, curveSegments);
     }
     throw new Error(`Unknown card face job ${job.name}`);

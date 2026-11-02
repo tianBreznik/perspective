@@ -58,6 +58,10 @@ export const PROJECT_DETAIL_META_FOOTER_BOTTOM = -CARD_HEIGHT / 2 + 0.13;
 export const PROJECT_DETAIL_META_CREDIT_FOOTER_GAP = 0.038;
 export const PROJECT_DETAIL_META_DESC_GAP = 0.1;
 export const PROJECT_INDEX_GAP = 0.24;
+export const PROJECT_INDEX_TOP_MARGIN = PROJECT_DETAIL_TOP_MARGIN;
+export const PROJECT_INDEX_BOTTOM_MARGIN = 0.34;
+export const PROJECT_INDEX_VIEWPORT_TOP = CARD_HEIGHT / 2 - PROJECT_INDEX_TOP_MARGIN;
+export const PROJECT_INDEX_VIEWPORT_BOTTOM = -CARD_HEIGHT / 2 + PROJECT_INDEX_BOTTOM_MARGIN;
 
 export function measureTextLabel(text, size, font, curveSegments = BAKE_CURVE_SEGMENTS) {
     const g = new TextGeometry(text, { font, size, height: 0.001, curveSegments, bevelEnabled: false });
@@ -209,12 +213,8 @@ export function buildProjectIndexLayout(items, font, curveSegments) {
         ...item,
         ...measureTextLabel(item.title, PROJECT_INDEX_SIZE, font, curveSegments),
     }));
-    // Space by cap-line → next-line-top so mixed-case / descender titles don't look extra open.
-    const totalH = metrics[0].ascent
-        + metrics.slice(1).reduce((sum, m) => sum + m.ascent, 0)
-        + metrics[metrics.length - 1].descent
-        + PROJECT_INDEX_GAP * (metrics.length - 1);
-    let baselineY = totalH / 2 - metrics[0].ascent;
+    // Top-aligned list: scroll reveals entries that overflow the fixed viewport.
+    let baselineY = PROJECT_INDEX_VIEWPORT_TOP - metrics[0].ascent;
     const entries = metrics.map((m, i) => {
         const entry = { ...m, x: -m.w / 2, y: baselineY };
         if (i < metrics.length - 1) {
@@ -222,15 +222,20 @@ export function buildProjectIndexLayout(items, font, curveSegments) {
         }
         return entry;
     });
-    const arrowMetrics = measureBackListArrow(BACK_LINK_SIZE);
     const last = entries[entries.length - 1];
-    const lastMidY = last.y + (last.ascent - last.descent) / 2;
+    const contentTop = PROJECT_INDEX_VIEWPORT_TOP;
+    const contentBottom = last.y - last.descent;
+    const contentHeight = Math.max(contentTop - contentBottom, PROJECT_INDEX_VIEWPORT_TOP - PROJECT_INDEX_VIEWPORT_BOTTOM);
+    const viewportHeight = PROJECT_INDEX_VIEWPORT_TOP - PROJECT_INDEX_VIEWPORT_BOTTOM;
+    const maxScroll = Math.max(0, (contentTop - contentBottom) - viewportHeight);
+
+    const arrowMetrics = measureBackListArrow(BACK_LINK_SIZE);
     const backLink = {
         label: BACK_LINK_LIST_LABEL,
         isArrow: true,
         ...arrowMetrics,
         x: -CARD_WIDTH / 2 + PROJECT_DETAIL_SIDE_MARGIN,
-        y: lastMidY - arrowMetrics.h / 2,
+        y: -CARD_HEIGHT / 2 + 0.12,
     };
     const backDetailMetrics = measureTextLabel(BACK_LINK_LABEL, BACK_LINK_SIZE, font, curveSegments);
     const backLinkDetail = {
@@ -239,7 +244,18 @@ export function buildProjectIndexLayout(items, font, curveSegments) {
         x: CARD_WIDTH / 2 - PROJECT_DETAIL_SIDE_MARGIN - backDetailMetrics.w,
         y: CARD_HEIGHT / 2 - PROJECT_DETAIL_TOP_MARGIN - backDetailMetrics.h,
     };
-    return { entries, backLink, backLinkDetail };
+    return {
+        entries,
+        backLink,
+        backLinkDetail,
+        contentTop,
+        contentBottom,
+        contentHeight,
+        viewportTop: PROJECT_INDEX_VIEWPORT_TOP,
+        viewportBottom: PROJECT_INDEX_VIEWPORT_BOTTOM,
+        viewportHeight,
+        maxScroll,
+    };
 }
 
 function createOrthoScene(worldW, worldH) {
@@ -313,7 +329,8 @@ function clampSupersample(renderer, w, h, supersample) {
 
 export function renderTextMaskScene(renderer, orthoScene, orthoCamera, w, h, supersample = TEXT_MASK_SUPERSAMPLE, clearColor = 0xffffff) {
     const ss = clampSupersample(renderer, w, h, supersample);
-    const msaa = renderer.capabilities.isWebGL2 ? 4 : 0;
+    // Avoid MSAA render targets: readRenderTargetPixels on multisampled targets
+    // is flaky in headless Chromium and can return solid black frames.
     const clear = new THREE.Color(clearColor);
 
     const loRt = new THREE.WebGLRenderTarget(w, h, {
@@ -322,7 +339,7 @@ export function renderTextMaskScene(renderer, orthoScene, orthoCamera, w, h, sup
         format: THREE.RGBAFormat,
         type: THREE.UnsignedByteType,
         generateMipmaps: false,
-        samples: ss === 1 ? msaa : 0,
+        samples: 0,
     });
 
     const prevRt = renderer.getRenderTarget();
@@ -347,7 +364,7 @@ export function renderTextMaskScene(renderer, orthoScene, orthoCamera, w, h, sup
         format: THREE.RGBAFormat,
         type: THREE.UnsignedByteType,
         generateMipmaps: false,
-        samples: msaa,
+        samples: 0,
     });
 
     renderer.setRenderTarget(hiRt);

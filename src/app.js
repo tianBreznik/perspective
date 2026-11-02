@@ -167,6 +167,19 @@ const emailText = EMAIL_TEXT;
 const quoteTextSize = QUOTE_TEXT_SIZE;
 const BACK_LINK_SIZE = cardFaceLayout.BACK_LINK_SIZE;
 const PROJECT_INDEX_SIZE = cardFaceLayout.PROJECT_INDEX_SIZE;
+const projectsListMaxScroll = projectIndexLayout.maxScroll;
+const projectsListContentBottom = projectIndexLayout.contentBottom;
+const projectsListContentHeight = projectIndexLayout.contentHeight;
+const projectsListViewportTop = projectIndexLayout.viewportTop;
+const projectsListViewportBottom = projectIndexLayout.viewportBottom;
+let projectsScrollY = 0;
+let projectsScrollDirty = true;
+const projectsScrollUniform = { value: 0 };
+let projectsFaceComposeTarget = null;
+let projectsFaceComposeScene = null;
+let projectsFaceComposeCamera = null;
+let projectsFaceComposeUniforms = null;
+let projectIndexScrollOverlays = [];
 
 const textureAspect = cardWidth / cardHeight;
 
@@ -772,6 +785,8 @@ function resetBackHoverState() {
 }
 
 function openBackProjectsIndex() {
+    setProjectsScrollY(0);
+    syncProjectsFaceTexture({ force: true });
     transitionBackFace('projects');
 }
 
@@ -791,11 +806,17 @@ function openProjectDetail(index) {
     activeProjectIndex = index;
     backFaceTextures.project = getProjectDetailTexture(index);
     activeProjectItem = item;
-    commitProjectFrameContent(item);
     projectFrameMode = 'in';
     projectFrameEl.style.visibility = 'visible';
+    // Freeze the project layer during the ink transition so the iframe can't fight the card for main-thread time.
+    setProjectFrameFrozen(true);
     transitionBackFace('project');
-    ensureProjectDetailAssets(index, { applyTexture: true });
+    updateProjectFramePerformance();
+    // Defer navigation/texture work off the click frame; hover prefetch often already warmed the iframe.
+    requestAnimationFrame(() => {
+        commitProjectFrameContent(item);
+        ensureProjectDetailAssets(index, { applyTexture: true });
+    });
 }
 
 function closeProjectDetail() {
@@ -813,6 +834,12 @@ function updateBackHoverPlaneVisibility() {
     backProjectsHoverPlanes.forEach((plane) => {
         if (plane.userData.kind === 'backLink') {
             plane.visible = plane.userData.backLinkContext === 'list' ? showProjects : showDetail;
+        } else if (plane.userData.kind === 'projectIndex') {
+            const entry = projectIndexLayout.entries[plane.userData.projectIndex];
+            plane.visible = showProjects && entry && isProjectEntryInViewport(entry, 0.05);
+            if (entry) {
+                plane.position.y = getProjectEntryScrollY(entry) + (entry.ascent - entry.descent) / 2;
+            }
         } else {
             plane.visible = showProjects;
         }
@@ -835,17 +862,122 @@ function updateBackHoverPlaneVisibility() {
     });
 }
 
-function createBackHighlightOverlay(maskTexture, hoverUniform, cardParent, overlayZ) {
+function createBackHighlightOverlay(maskTexture, hoverUniform, cardParent, overlayZ, { scrollable = false } = {}) {
+    const uniforms = {
+        uMask: { value: maskTexture },
+        uHover: hoverUniform,
+    };
+    let fragmentShader = `
+        ${ENGRAVE_MASK_INK_GLSL}
+        uniform sampler2D uMask;
+        uniform float uHover;
+        varying vec2 vUv;
+        void main() {
+            float inText = sampleEngraveInk(uMask, vUv);
+            vec3 blue = vec3(0.25, 0.45, 0.95);
+            gl_FragColor = vec4(blue, inText * uHover);
+        }
+    `;
+    if (scrollable) {
+        uniforms.uScroll = projectsScrollUniform;
+        uniforms.uContentBottom = { value: projectsListContentBottom };
+        uniforms.uContentHeight = { value: projectsListContentHeight };
+        uniforms.uViewportTop = { value: projectsListViewportTop };
+        uniforms.uViewportBottom = { value: projectsListViewportBottom };
+        uniforms.uCardHeight = { value: cardHeight };
+        fragmentShader = `
+            ${ENGRAVE_MASK_INK_GLSL}
+            uniform sampler2D uMask;
+            uniform float uHover;
+            uniform float uScroll;
+            uniform float uContentBottom;
+            uniform float uContentHeight;
+            uniform float uViewportTop;
+            uniform float uViewportBottom;
+            uniform float uCardHeight;
+            varying vec2 vUv;
+            void main() {
+                float cardY = (vUv.y - 0.5) * uCardHeight;
+                if (cardY > uViewportTop || cardY < uViewportBottom) {
+                    gl_FragColor = vec4(0.0);
+                    return;
+                }
+                float contentY = cardY - uScroll;
+                float vList = (contentY - uContentBottom) / max(uContentHeight, 0.0001);
+                if (vList < 0.0 || vList > 1.0) {
+                    gl_FragColor = vec4(0.0);
+                    return;
+                }
+                float inText = sampleEngraveInk(uMask, vec2(vUv.x, vList));
+                vec3 blue = vec3(0.25, 0.45, 0.95);
+                gl_FragColor = vec4(blue, inText * uHover);
+            }
+        `;
+    }
     const geom = new THREE.PlaneGeometry(cardWidth, cardHeight);
     const mat = new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
         depthTest: false,
         side: THREE.DoubleSide,
-        uniforms: {
-            uMask: { value: maskTexture },
-            uHover: hoverUniform,
-        },
+        uniforms,
+        vertexShader: `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.position.set(0, 0, overlayZ);
+    mesh.rotation.y = Math.PI;
+    mesh.renderOrder = 1;
+    mesh.userData.scrollableHighlight = scrollable;
+    cardParent.add(mesh);
+    return mesh;
+}
+
+function initProjectsFaceComposer(listTexture, arrowTexture) {
+    const w = Math.round(TEXTURE_SIZE);
+    const h = Math.round(TEXTURE_SIZE * (cardHeight / cardWidth));
+    projectsFaceComposeTarget = new THREE.WebGLRenderTarget(w, h, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        generateMipmaps: false,
+    });
+    projectsFaceComposeTarget.texture.flipY = false;
+    configureCardTextMaskTexture(projectsFaceComposeTarget.texture);
+
+    projectsFaceComposeUniforms = {
+        uList: { value: listTexture },
+        uArrow: { value: arrowTexture },
+        uScroll: projectsScrollUniform,
+        uMaxScroll: { value: projectsListMaxScroll },
+        uContentBottom: { value: projectsListContentBottom },
+        uContentHeight: { value: projectsListContentHeight },
+        uViewportTop: { value: projectsListViewportTop },
+        uViewportBottom: { value: projectsListViewportBottom },
+        uCardWidth: { value: cardWidth },
+        uCardHeight: { value: cardHeight },
+    };
+
+    projectsFaceComposeScene = new THREE.Scene();
+    projectsFaceComposeCamera = new THREE.OrthographicCamera(
+        -cardWidth / 2, cardWidth / 2,
+        cardHeight / 2, -cardHeight / 2,
+        0.1, 10,
+    );
+    projectsFaceComposeCamera.position.z = 1;
+    projectsFaceComposeCamera.lookAt(0, 0, 0);
+
+    const mat = new THREE.ShaderMaterial({
+        uniforms: projectsFaceComposeUniforms,
+        depthTest: false,
+        depthWrite: false,
         vertexShader: `
             varying vec2 vUv;
             void main() {
@@ -854,23 +986,198 @@ function createBackHighlightOverlay(maskTexture, hoverUniform, cardParent, overl
             }
         `,
         fragmentShader: `
-            ${ENGRAVE_MASK_INK_GLSL}
-            uniform sampler2D uMask;
-            uniform float uHover;
+            uniform sampler2D uList;
+            uniform sampler2D uArrow;
+            uniform float uScroll;
+            uniform float uMaxScroll;
+            uniform float uContentBottom;
+            uniform float uContentHeight;
+            uniform float uViewportTop;
+            uniform float uViewportBottom;
+            uniform float uCardWidth;
+            uniform float uCardHeight;
             varying vec2 vUv;
+
+            float sdSeg(vec2 pt, vec2 a, vec2 b) {
+                vec2 pa = pt - a;
+                vec2 ba = b - a;
+                float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+                return length(pa - ba * h);
+            }
+
+            float strokeSeg(vec2 pt, vec2 a, vec2 b, float w) {
+                return 1.0 - smoothstep(w, w + 0.0025, sdSeg(pt, a, b));
+            }
+
+            float sdTriangle(vec2 p, vec2 a, vec2 b, vec2 c) {
+                vec2 e0 = b - a; vec2 e1 = c - b; vec2 e2 = a - c;
+                vec2 v0 = p - a; vec2 v1 = p - b; vec2 v2 = p - c;
+                vec2 pq0 = v0 - e0 * clamp(dot(v0, e0) / max(dot(e0, e0), 1e-6), 0.0, 1.0);
+                vec2 pq1 = v1 - e1 * clamp(dot(v1, e1) / max(dot(e1, e1), 1e-6), 0.0, 1.0);
+                vec2 pq2 = v2 - e2 * clamp(dot(v2, e2) / max(dot(e2, e2), 1e-6), 0.0, 1.0);
+                float s = sign(e0.x * e2.y - e0.y * e2.x);
+                vec2 d = min(min(
+                    vec2(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
+                    vec2(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))),
+                    vec2(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
+                return -sqrt(d.x) * sign(d.y);
+            }
+
             void main() {
-                float inText = sampleEngraveInk(uMask, vUv);
-                vec3 blue = vec3(0.25, 0.45, 0.95);
-                gl_FragColor = vec4(blue, inText * uHover);
+                float cardY = (vUv.y - 0.5) * uCardHeight;
+                float cardX = (vUv.x - 0.5) * uCardWidth;
+                vec3 listRgb = vec3(1.0);
+                if (cardY <= uViewportTop && cardY >= uViewportBottom) {
+                    float contentY = cardY - uScroll;
+                    float vList = (contentY - uContentBottom) / max(uContentHeight, 0.0001);
+                    if (vList >= 0.0 && vList <= 1.0) {
+                        listRgb = texture2D(uList, vec2(vUv.x, vList)).rgb;
+                    }
+
+                    // Soft edge fades where more titles exist beyond the viewport.
+                    float fadeH = 0.16;
+                    float canUp = step(0.001, uScroll);
+                    float canDown = step(0.001, uMaxScroll - uScroll);
+                    float keep = 1.0;
+                    if (canUp > 0.5) {
+                        keep = min(keep, smoothstep(uViewportTop, uViewportTop - fadeH, cardY));
+                    }
+                    if (canDown > 0.5) {
+                        keep = min(keep, smoothstep(uViewportBottom, uViewportBottom + fadeH, cardY));
+                    }
+                    listRgb = mix(vec3(1.0), listRgb, keep);
+                }
+
+                // Trackless scroll mark: stem + back-arrow-style heads only toward overflow.
+                if (uMaxScroll > 0.001
+                    && cardY <= uViewportTop + 0.05 && cardY >= uViewportBottom - 0.05) {
+                    float markX = uCardWidth * 0.5 - 0.1;
+                    float viewH = uViewportTop - uViewportBottom;
+                    float thumbH = max(viewH * (viewH / max(uContentHeight, viewH)), 0.28);
+                    float travel = max(viewH - thumbH, 0.0001);
+                    float t = clamp(uScroll / uMaxScroll, 0.0, 1.0);
+                    float thumbCenter = uViewportTop - thumbH * 0.5 - t * travel;
+                    float thumbTop = thumbCenter + thumbH * 0.5;
+                    float thumbBot = thumbCenter - thumbH * 0.5;
+
+                    float canUp = step(0.001, uScroll);
+                    float canDown = step(0.001, uMaxScroll - uScroll);
+
+                    // Match back-arrow head proportions (rotated to point up/down).
+                    // back: headLen ≈ size*1.36*0.27, headSpread ≈ size*0.105*1.55
+                    float headLen = 0.028;
+                    float headSpread = 0.0125;
+                    float stemW = 0.0036;
+                    float stemInset = headLen * 0.85;
+
+                    vec2 p = vec2(cardX, cardY);
+                    float ink = strokeSeg(
+                        p,
+                        vec2(markX, thumbBot + (canDown > 0.5 ? stemInset : 0.0)),
+                        vec2(markX, thumbTop - (canUp > 0.5 ? stemInset : 0.0)),
+                        stemW
+                    );
+
+                    // Down head at bottom when more content below (same triangle as ← back head)
+                    if (canDown > 0.5) {
+                        float botTri = sdTriangle(
+                            p,
+                            vec2(markX, thumbBot - headLen * 0.15),
+                            vec2(markX - headSpread, thumbBot + headLen * 0.85),
+                            vec2(markX + headSpread, thumbBot + headLen * 0.85)
+                        );
+                        ink = max(ink, 1.0 - smoothstep(0.0, 0.0015, botTri));
+                    }
+
+                    // Up head at top when more content above
+                    if (canUp > 0.5) {
+                        float topTri = sdTriangle(
+                            p,
+                            vec2(markX, thumbTop + headLen * 0.15),
+                            vec2(markX - headSpread, thumbTop - headLen * 0.85),
+                            vec2(markX + headSpread, thumbTop - headLen * 0.85)
+                        );
+                        ink = max(ink, 1.0 - smoothstep(0.0, 0.0015, topTri));
+                    }
+
+                    listRgb *= 1.0 - ink;
+                }
+
+                vec3 arrowRgb = texture2D(uArrow, vUv).rgb;
+                gl_FragColor = vec4(min(listRgb, arrowRgb), 1.0);
             }
         `,
     });
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.position.set(0, 0, overlayZ);
-    mesh.rotation.y = Math.PI;
-    mesh.renderOrder = 1;
-    cardParent.add(mesh);
-    return mesh;
+    projectsFaceComposeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(cardWidth, cardHeight), mat));
+}
+
+function composeProjectsFaceTexture() {
+    if (!projectsFaceComposeTarget || !projectsFaceComposeUniforms) return null;
+    projectsScrollUniform.value = projectsScrollY;
+    const prevRt = renderer.getRenderTarget();
+    const prevClear = renderer.getClearColor(new THREE.Color());
+    renderer.setRenderTarget(projectsFaceComposeTarget);
+    renderer.setClearColor(0xffffff, 1);
+    renderer.clear();
+    renderer.render(projectsFaceComposeScene, projectsFaceComposeCamera);
+    renderer.setRenderTarget(prevRt);
+    renderer.setClearColor(prevClear);
+    projectsScrollDirty = false;
+    return projectsFaceComposeTarget.texture;
+}
+
+function syncProjectsFaceTexture({ force = false } = {}) {
+    if (!force && !projectsScrollDirty) return;
+    const tex = composeProjectsFaceTexture();
+    if (!tex) return;
+    backProjectsTextTexture = tex;
+    backFaceTextures.projects = tex;
+    if (backInkBlendUniforms) {
+        if (backFaceTarget === 'projects') {
+            if (isBackInkTransitioning()) backInkBlendUniforms.uTo.value = tex;
+            else {
+                backInkBlendUniforms.uFrom.value = tex;
+                backInkBlendUniforms.uTo.value = tex;
+            }
+        } else if (backInkBlendUniforms.uFrom.value === tex || backInkBlendUniforms.uTo.value === tex) {
+            // keep references current while leaving projects
+        }
+    }
+    lastInkRenderProgress = -1;
+}
+
+function setProjectsScrollY(next) {
+    const clamped = THREE.MathUtils.clamp(next, 0, projectsListMaxScroll);
+    if (Math.abs(clamped - projectsScrollY) < 0.0001) return false;
+    projectsScrollY = clamped;
+    projectsScrollUniform.value = projectsScrollY;
+    projectsScrollDirty = true;
+    updateProjectsListHoverPlanes();
+    syncProjectsFaceTexture({ force: true });
+    return true;
+}
+
+function getProjectEntryScrollY(entry) {
+    return entry.y + projectsScrollY;
+}
+
+function isProjectEntryInViewport(entry, pad = 0) {
+    const top = getProjectEntryScrollY(entry) + entry.ascent;
+    const bottom = getProjectEntryScrollY(entry) - entry.descent;
+    return bottom <= projectsListViewportTop + pad && top >= projectsListViewportBottom - pad;
+}
+
+function updateProjectsListHoverPlanes() {
+    const pad = 0.05;
+    const showProjects = isBackProjectsActive();
+    backProjectsHoverPlanes.forEach((plane) => {
+        if (plane.userData.kind !== 'projectIndex') return;
+        const entry = projectIndexLayout.entries[plane.userData.projectIndex];
+        if (!entry) return;
+        const centerY = getProjectEntryScrollY(entry) + (entry.ascent - entry.descent) / 2;
+        plane.position.y = centerY;
+        plane.visible = showProjects && isProjectEntryInViewport(entry, pad);
+    });
 }
 
 function createHoverPlane(width, height, x, y, z, rotationY = 0) {
@@ -1027,6 +1334,7 @@ function disposeCard() {
     backEmailOverlay = null;
     backButtonOverlays = [];
     backProjectsOverlays = [];
+    projectIndexScrollOverlays = [];
     projectIndexHoverUniforms = [];
     lastInkRenderProgress = -1;
 }
@@ -1036,7 +1344,13 @@ function initCard() {
     walletTextMaskTexture = frontTextTexture;
 
     backHomeTextTexture = cardBakedTextures['back-home'];
-    backProjectsTextTexture = cardBakedTextures['back-projects'];
+    const backProjectsListTexture = cardBakedTextures['back-projects-list'];
+    const backLinkListMaskTexture = cardBakedTextures['back-link-mask'];
+    initProjectsFaceComposer(backProjectsListTexture, backLinkListMaskTexture);
+    projectsScrollY = 0;
+    projectsScrollUniform.value = 0;
+    projectsScrollDirty = true;
+    backProjectsTextTexture = composeProjectsFaceTexture() || cardBakedTextures['back-projects'];
     backFaceTextures.home = backHomeTextTexture;
     backFaceTextures.projects = backProjectsTextTexture;
     initBackInkBlend();
@@ -1047,7 +1361,6 @@ function initCard() {
     const projectIndexMaskTextures = PROJECT_INDEX_ITEMS.map(
         (item) => cardBakedTextures[cardIndexTextureKey(item.slug)],
     );
-    const backLinkListMaskTexture = cardBakedTextures['back-link-mask'];
     const backLinkDetailMaskTexture = cardBakedTextures['back-link-detail-mask'];
 
     const frontMaterial = createEngravedMaterial({}, frontTextTexture, false, frontLetterColorsTexture, true);
@@ -1108,8 +1421,18 @@ function initCard() {
     );
 
     projectIndexHoverUniforms = projectIndexLayout.entries.map(() => ({ value: 0 }));
+    projectIndexScrollOverlays = [];
     projectIndexMaskTextures.forEach((maskTex, i) => {
-        backProjectsOverlays.push(createBackHighlightOverlay(maskTex, projectIndexHoverUniforms[i], card, overlayZ));
+        const overlay = createBackHighlightOverlay(
+            maskTex,
+            projectIndexHoverUniforms[i],
+            card,
+            overlayZ,
+            { scrollable: true },
+        );
+        overlay.userData.isProjectIndexOverlay = true;
+        projectIndexScrollOverlays.push(overlay);
+        backProjectsOverlays.push(overlay);
     });
     const backLinkListOverlay = createBackHighlightOverlay(backLinkListMaskTexture, backLinkHoverUniform, card, overlayZ);
     backLinkListOverlay.userData.isBackLinkListOverlay = true;
@@ -1219,7 +1542,7 @@ function initCard() {
     projectIndexLayout.entries.forEach((entry, i) => {
         const centerX = entry.x + entry.w / 2;
         const mirroredX = -centerX;
-        const centerY = entry.y + (entry.ascent - entry.descent) / 2;
+        const centerY = getProjectEntryScrollY(entry) + (entry.ascent - entry.descent) / 2;
         const itemPlane = createHoverPlane(
             entry.w + pad * 2,
             entry.h + pad * 2,
@@ -1500,10 +1823,13 @@ function updateHover() {
             hoveringBackButton = hit.object.userData.buttonIndex;
         }
         if (kind === 'projectIndex' && backVisible && isBackProjectsActive()) {
-            hoveringProjectIndex = hit.object.userData.projectIndex;
-            const item = projectIndexItems[hoveringProjectIndex];
-            if (item?.url) prefetchProjectUrl(item.url);
-            prefetchProjectDetailAssets(hoveringProjectIndex);
+            const entry = projectIndexLayout.entries[hit.object.userData.projectIndex];
+            if (entry && isProjectEntryInViewport(entry)) {
+                hoveringProjectIndex = hit.object.userData.projectIndex;
+                const item = projectIndexItems[hoveringProjectIndex];
+                if (item?.url) prefetchProjectUrl(item.url);
+                prefetchProjectDetailAssets(hoveringProjectIndex);
+            }
         }
         if (kind === 'projectTitle' && backVisible && isBackProjectDetailActive()) {
             hoveringProjectTitle = true;
@@ -1530,32 +1856,50 @@ function updateHover() {
             else if (hitTestEmailAtLayout(layout.x, layout.y)) isHoveringEmail = true;
         }
     }
+
+    if (backVisible && isBackProjectsActive() && hoveringProjectIndex < 0) {
+        const layout = getBackFaceLayoutFromHits(hits);
+        if (layout) {
+            for (let i = 0; i < projectIndexLayout.entries.length; i++) {
+                const entry = projectIndexLayout.entries[i];
+                const entryY = getProjectEntryScrollY(entry);
+                if (!isProjectEntryInViewport(entry)) continue;
+                if (layout.x >= entry.x && layout.x <= entry.x + entry.w
+                    && layout.y >= entryY - entry.descent && layout.y <= entryY + entry.ascent) {
+                    hoveringProjectIndex = i;
+                    const item = projectIndexItems[i];
+                    if (item?.url) prefetchProjectUrl(item.url);
+                    prefetchProjectDetailAssets(i);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 // Ambient lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
 scene.add(ambientLight);
 
-// Card-flip rotation — tune these constants to adjust feel
+// Card-flip rotation — free twist while spinning; soft slot-in only when slow
 const YAW_SENSITIVITY = IS_MOBILE ? 0.018 : 0.016;
 const PITCH_SENSITIVITY = IS_MOBILE ? 0.0045 : 0.004;
 const MAX_CARD_PITCH = Math.PI / 6;
-const ROTATION_DAMPING = 0.9;        // per 60 fps frame; coast after release
-const FACE_SNAP_SPEED = 5.5;         // spring toward front/back — only after coast stops
-const SNAP_START_THRESHOLD = 0.012;  // rad/frame — snap engages below this speed
+const ROTATION_DAMPING = 0.955;      // per 60 fps frame — longer coast / more weight
+const FACE_SNAP_SPEED = 3.2;         // softer ease into front/back once snap starts
+const SNAP_START_THRESHOLD = 0.0055; // rad/frame — only slot in when nearly stopped
 const SNAP_SETTLE_EPS = 0.0008;
-const RELEASE_VELOCITY_SCALE = 0.4;
+const RELEASE_VELOCITY_SCALE = 0.72;  // keep throw momentum so twists feel free
 const DRAG_THRESHOLD_PX = IS_MOBILE ? 4 : 5;
 const CARD_CAPTURE_EPS_PX = 2;
 
 let isDragging = false;
+let isProjectsListScrolling = false;
 let suppressNextCardClick = false;
 let pointerDownPos = null;
 let previousMousePosition = { x: 0, y: 0 };
 let rotation = { x: 0, y: 0 };
 let velocity = { x: 0, y: 0 };
-let dragYawSign = 1;
-
 function lerpAngle(current, target, t) {
     let delta = target - current;
     delta = ((delta + Math.PI) % (Math.PI * 2)) - Math.PI;
@@ -1572,18 +1916,15 @@ function getNearestCardFaceYaw(yaw) {
     return yaw + toBack;
 }
 
-function getStableYawDragSign(yaw = rotation.y) {
-    const norm = THREE.MathUtils.euclideanModulo(yaw + Math.PI, Math.PI * 2) - Math.PI;
-    return Math.abs(norm) < Math.PI / 2 ? 1 : -1;
-}
-
 function clampCardPitch() {
     rotation.x = Math.max(-MAX_CARD_PITCH, Math.min(MAX_CARD_PITCH, rotation.x));
 }
 
 function applyCardRotationDelta(deltaX, deltaY) {
     if (!card || (!deltaX && !deltaY)) return;
-    const rotYaw = deltaX * YAW_SENSITIVITY * dragYawSign;
+    // Fixed screen-space mapping — same swipe direction always spins the same way,
+    // whether the front or back face is showing (no face-dependent sign flip).
+    const rotYaw = deltaX * YAW_SENSITIVITY;
     const rotPitch = -deltaY * PITCH_SENSITIVITY;
     rotation.y += rotYaw;
     rotation.x += rotPitch;
@@ -1600,13 +1941,15 @@ function updateCardRotationPhysics(delta) {
     const frameScale = delta * 60;
     const damp = Math.pow(ROTATION_DAMPING, frameScale);
     rotation.y += velocity.y * frameScale;
-    rotation.x += velocity.x * frameScale;
     velocity.y *= damp;
-    velocity.x *= damp;
+
+    // Pitch should not coast with the spin — ease upright while yaw keeps momentum.
+    velocity.x = 0;
+    const pitchRecover = 1 - Math.exp(-10 * delta);
+    rotation.x = THREE.MathUtils.lerp(rotation.x, 0, pitchRecover);
     clampCardPitch();
 
-    const coasting = Math.hypot(velocity.x, velocity.y);
-    if (coasting >= SNAP_START_THRESHOLD) {
+    if (Math.abs(velocity.y) >= SNAP_START_THRESHOLD) {
         card.rotation.y = rotation.y;
         card.rotation.x = rotation.x;
         return;
@@ -1617,7 +1960,6 @@ function updateCardRotationPhysics(delta) {
     rotation.y = lerpAngle(rotation.y, targetYaw, snapT);
     rotation.x = THREE.MathUtils.lerp(rotation.x, 0, snapT);
     clampCardPitch();
-    velocity.x = 0;
     velocity.y = 0;
 
     if (Math.abs(rotation.y - targetYaw) < SNAP_SETTLE_EPS && Math.abs(rotation.x) < SNAP_SETTLE_EPS) {
@@ -1671,38 +2013,34 @@ function updateProjectFramePerformance() {
     if (!isProjectBackgroundActive()) {
         setProjectFrameFrozen(false);
         document.body.classList.remove('project-bg-active');
-        if (renderer.getPixelRatio() !== MAX_DEVICE_PIXEL_RATIO) {
-            renderer.setPixelRatio(MAX_DEVICE_PIXEL_RATIO);
-        }
         return;
     }
 
     document.body.classList.add('project-bg-active');
-    setProjectFrameFrozen(isDragging);
-
-    if (renderer.getPixelRatio() !== MAX_DEVICE_PIXEL_RATIO) {
-        renderer.setPixelRatio(MAX_DEVICE_PIXEL_RATIO);
-    }
+    // Keep the iframe frozen while flipping/dragging so its layout/paint doesn't hitch the card.
+    setProjectFrameFrozen(isDragging || isBackInkTransitioning());
 }
 
 function beginCardPointer(clientX, clientY, event) {
     pointerDownPos = { x: clientX, y: clientY };
     isDragging = false;
+    isProjectsListScrolling = false;
     velocity.x = 0;
     velocity.y = 0;
-    dragYawSign = getStableYawDragSign();
     previousMousePosition = { x: clientX, y: clientY };
     onPointerMove(event);
 }
 
 function endCardPointer(event) {
-    suppressNextCardClick = isDragging;
-    if (isDragging) {
-        velocity.x *= RELEASE_VELOCITY_SCALE;
+    suppressNextCardClick = isDragging || isProjectsListScrolling;
+    if (isDragging && !isProjectsListScrolling) {
+        // Keep yaw throw; drop pitch so the card doesn't keep leaning while coasting.
         velocity.y *= RELEASE_VELOCITY_SCALE;
+        velocity.x = 0;
     }
     pointerDownPos = null;
     isDragging = false;
+    isProjectsListScrolling = false;
     updateProjectFramePerformance();
 }
 
@@ -1714,14 +2052,26 @@ function moveCardPointer(clientX, clientY, event) {
     }
     const dx = clientX - pointerDownPos.x;
     const dy = clientY - pointerDownPos.y;
-    if (!isDragging && (dx * dx + dy * dy) > DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
-        isDragging = true;
-        velocity.x = 0;
-        velocity.y = 0;
-        dragYawSign = getStableYawDragSign();
-        previousMousePosition.x = clientX;
-        previousMousePosition.y = clientY;
-        updateProjectFramePerformance();
+    if (!isDragging && !isProjectsListScrolling
+        && (dx * dx + dy * dy) > DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
+        const startProjectsScroll = canScrollProjectsList()
+            && Math.abs(dy) > Math.abs(dx) * 1.15;
+        if (startProjectsScroll) {
+            isProjectsListScrolling = true;
+            isDragging = true;
+            velocity.x = 0;
+            velocity.y = 0;
+            previousMousePosition.x = clientX;
+            previousMousePosition.y = clientY;
+            updateProjectFramePerformance();
+        } else {
+            isDragging = true;
+            velocity.x = 0;
+            velocity.y = 0;
+            previousMousePosition.x = clientX;
+            previousMousePosition.y = clientY;
+            updateProjectFramePerformance();
+        }
     }
     if (!isDragging) {
         updateHover();
@@ -1729,10 +2079,40 @@ function moveCardPointer(clientX, clientY, event) {
     }
     const deltaX = clientX - previousMousePosition.x;
     const deltaY = clientY - previousMousePosition.y;
+    if (isProjectsListScrolling) {
+        // Finger / drag follows content: drag down → list moves down.
+        scrollProjectsListBy(deltaY * 0.0045);
+        previousMousePosition.x = clientX;
+        previousMousePosition.y = clientY;
+        updateHover();
+        return;
+    }
     applyCardRotationDelta(deltaX, deltaY);
     previousMousePosition.x = clientX;
     previousMousePosition.y = clientY;
 }
+
+function canScrollProjectsList() {
+    return !!card && isBackProjectsActive() && projectsListMaxScroll > 0;
+}
+
+function scrollProjectsListBy(deltaWorldY) {
+    if (!canScrollProjectsList()) return false;
+    return setProjectsScrollY(projectsScrollY + deltaWorldY);
+}
+
+document.addEventListener('wheel', (e) => {
+    if (!canScrollProjectsList()) return;
+    if (!pointerHitsCard(e.clientX, e.clientY)) return;
+    const { backVisible } = getCardFaceVisibility();
+    if (!backVisible) return;
+    // Wheel down → list moves down (reversed from prior mapping).
+    const delta = THREE.MathUtils.clamp(e.deltaY * 0.0022, -0.35, 0.35);
+    if (scrollProjectsListBy(delta)) {
+        e.preventDefault();
+        updateHover();
+    }
+}, { passive: false });
 
 document.addEventListener('mousedown', (e) => {
     if (isProjectBackgroundActive() && !pointerHitsCard(e.clientX, e.clientY)) return;
@@ -1822,8 +2202,10 @@ function tryBackProjectsLayoutTap(hits) {
 
     for (let i = 0; i < projectIndexLayout.entries.length; i++) {
         const entry = projectIndexLayout.entries[i];
+        const entryY = getProjectEntryScrollY(entry);
+        if (!isProjectEntryInViewport(entry, pad)) continue;
         if (layout.x >= entry.x - pad && layout.x <= entry.x + entry.w + pad
-            && layout.y >= entry.y - entry.descent - pad && layout.y <= entry.y + entry.ascent + pad) {
+            && layout.y >= entryY - entry.descent - pad && layout.y <= entryY + entry.ascent + pad) {
             projectIndexHoverUniforms[i].value = 1;
             setTimeout(() => { projectIndexHoverUniforms[i].value = 0; }, 250);
             handleProjectIndexClick(i);
@@ -2159,7 +2541,8 @@ const projectFrameContent = document.createElement('div');
 projectFrameContent.className = 'project-frame-content';
 const projectFrameIframe = document.createElement('iframe');
 projectFrameIframe.title = 'Project preview';
-projectFrameIframe.setAttribute('loading', 'eager');
+projectFrameIframe.setAttribute('loading', 'lazy');
+projectFrameIframe.setAttribute('importance', 'low');
 projectFrameContent.appendChild(projectFrameIframe);
 const projectFrameImg = document.createElement('img');
 projectFrameImg.alt = 'Project preview';
@@ -2231,17 +2614,17 @@ function updateCardPointerCapture() {
     cardPointerCapture.style.clipPath = `polygon(${poly})`;
 }
 
-const projectPrefetchIframe = document.createElement('iframe');
-projectPrefetchIframe.setAttribute('aria-hidden', 'true');
-projectPrefetchIframe.setAttribute('tabindex', '-1');
-projectPrefetchIframe.style.cssText = 'position:fixed;width:0;height:0;border:0;opacity:0;pointer-events:none';
-document.body.appendChild(projectPrefetchIframe);
 let prefetchedProjectUrl = null;
 
 function prefetchProjectUrl(url) {
-    if (!url || url === prefetchedProjectUrl || projectFrameIframe.getAttribute('src') === url) return;
+    // Warm the real project iframe (while hidden) so opening a project doesn't start a second load.
+    if (!url || projectFrameMode === 'in') return;
+    if (url === prefetchedProjectUrl || projectFrameIframe.getAttribute('src') === url) return;
     prefetchedProjectUrl = url;
-    projectPrefetchIframe.src = url;
+    loadedProjectFrameKey = url;
+    projectFrameIframe.style.display = 'block';
+    projectFrameImg.style.display = 'none';
+    projectFrameIframe.src = url;
 }
 
 function isProjectBackgroundActive() {
@@ -2312,17 +2695,28 @@ function projectFrameItemKey(item) {
 
 function commitProjectFrameContent(item) {
     const key = projectFrameItemKey(item);
-    if (loadedProjectFrameKey === key) return;
-    loadedProjectFrameKey = key;
     if (item.image) {
+        if (loadedProjectFrameKey === key) {
+            projectFrameImg.style.display = 'block';
+            projectFrameIframe.style.display = 'none';
+            return;
+        }
+        loadedProjectFrameKey = key;
         if (projectFrameImg.getAttribute('src') !== item.image) projectFrameImg.src = item.image;
         projectFrameImg.style.display = 'block';
         projectFrameIframe.style.display = 'none';
-    } else {
-        if (projectFrameIframe.src !== item.url) projectFrameIframe.src = item.url;
+        return;
+    }
+    if (loadedProjectFrameKey === key || projectFrameIframe.getAttribute('src') === item.url) {
+        loadedProjectFrameKey = key;
         projectFrameIframe.style.display = 'block';
         projectFrameImg.style.display = 'none';
+        return;
     }
+    loadedProjectFrameKey = key;
+    projectFrameIframe.src = item.url;
+    projectFrameIframe.style.display = 'block';
+    projectFrameImg.style.display = 'none';
 }
 
 function setProjectFrameContent(item) {
@@ -2698,6 +3092,22 @@ const walletGlassSrcCtx = walletGlassSrcCanvas.getContext('2d', { alpha: true, w
 let walletGlassBuf = null;
 let walletGlassLastW = 0;
 let walletGlassLastH = 0;
+let walletGlassActive = false;
+
+function setWalletGlassActive(active) {
+    walletGlassActive = !!active;
+    walletGlassButton?.classList.toggle('is-glass-active', walletGlassActive);
+    if (!walletGlassActive && walletGlassCtx && walletGlassCanvas) {
+        walletGlassCtx.clearRect(0, 0, walletGlassCanvas.width, walletGlassCanvas.height);
+    }
+}
+
+if (walletGlassButton) {
+    walletGlassButton.addEventListener('pointerenter', () => setWalletGlassActive(true));
+    walletGlassButton.addEventListener('pointerleave', () => setWalletGlassActive(false));
+    walletGlassButton.addEventListener('focus', () => setWalletGlassActive(true));
+    walletGlassButton.addEventListener('blur', () => setWalletGlassActive(false));
+}
 
 function clamp(v, min, max) {
     return v < min ? min : (v > max ? max : v);
@@ -2714,10 +3124,12 @@ function sampleChannelOverWhite(src, w, h, x, y, channel, bg = 255) {
 
 function renderWalletButtonRefraction(timeSec) {
     if (!walletGlassCanvas || !walletGlassButton || !walletGlassCtx || !walletGlassSrcCtx) return;
+    // Heavy CPU path — only while the button is hovered/focused.
+    if (!walletGlassActive || isProjectBackgroundActive() || isDragging) return;
     const rect = walletGlassButton.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
 
-    const dpr = renderer.getPixelRatio();
+    const dpr = Math.min(renderer.getPixelRatio(), 1.25);
     const w = Math.max(2, Math.round(rect.width * dpr));
     const h = Math.max(2, Math.round(rect.height * dpr));
     if (walletGlassCanvas.width !== w || walletGlassCanvas.height !== h) {
@@ -2745,14 +3157,15 @@ function renderWalletButtonRefraction(timeSec) {
     walletGlassSrcCtx.fillRect(0, 0, w, h);
     walletGlassSrcCtx.drawImage(renderer.domElement, sx, sy, sw, sh, 0, 0, w, h);
 
-    // Draw button label into the source layer so it sits "behind" glass and gets refracted.
+    // Label must be in the source or the refraction has almost nothing visible to warp.
+    // Use true vertical center (0.5) to match the CSS label — 0.53 was optical nudge and caused the jump.
     const label = 'Add to Wallet';
     walletGlassSrcCtx.save();
     walletGlassSrcCtx.textAlign = 'center';
     walletGlassSrcCtx.textBaseline = 'middle';
     walletGlassSrcCtx.font = `${Math.round(h * 0.40)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif`;
     walletGlassSrcCtx.fillStyle = 'rgba(36, 40, 48, 0.88)';
-    walletGlassSrcCtx.fillText(label, w * 0.5, h * 0.53);
+    walletGlassSrcCtx.fillText(label, w * 0.5, h * 0.5);
     walletGlassSrcCtx.restore();
 
     const srcData = walletGlassSrcCtx.getImageData(0, 0, w, h);
@@ -2875,6 +3288,7 @@ function animate() {
             backLinkHoverUniform.value += (backLinkTarget - backLinkHoverUniform.value) * HOVER_LERP;
         }
 
+        if (projectsScrollDirty) syncProjectsFaceTexture();
         backInkProgress.value += (1 - backInkProgress.value) * Math.min(1, delta * BACK_INK_SPEED);
         if (backInkProgress.value > 0.996) backInkProgress.value = 1; // settle so the composite pass can stop
         updateBackFaceTextMask();

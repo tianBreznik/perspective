@@ -46,9 +46,20 @@ function pixelsToBase64Png(pixels, w, h) {
     return canvas.toDataURL('image/png').split(',')[1];
 }
 
-function bakeTarget(renderer, targetResult) {
+function bakeTarget(renderer, targetResult, label = 'texture') {
     const { rt, w, h } = targetResult;
     const pixels = readRenderTargetPixels(renderer, rt, w, h);
+    rt.dispose();
+    let black = 0;
+    let white = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+        const v = pixels[i];
+        if (v < 16) black += 1;
+        else if (v > 240) white += 1;
+    }
+    if (white < 100 || black < 10) {
+        throw new Error(`Bake produced blank frame for ${label} (${w}x${h}, black=${black}, white=${white})`);
+    }
     return { w, h, base64: pixelsToBase64Png(pixels, w, h) };
 }
 
@@ -88,7 +99,7 @@ async function runBake() {
                 backButtonFont,
                 job,
                 PROJECT_INDEX_ITEMS,
-            )),
+            ), job.name),
         });
     }
 
@@ -102,7 +113,11 @@ async function runBake() {
             group: 'project',
             slug: item.slug,
             name: 'detail',
-            ...bakeTarget(renderer, renderProjectDetailTarget(renderer, backButtonFont, item, projectIndexLayout)),
+            ...bakeTarget(
+                renderer,
+                renderProjectDetailTarget(renderer, backButtonFont, item, projectIndexLayout),
+                `${item.slug}/detail`,
+            ),
         });
 
         await yieldToBrowser();
@@ -112,7 +127,11 @@ async function runBake() {
             group: 'project',
             slug: item.slug,
             name: 'title-mask',
-            ...bakeTarget(renderer, renderTitleMaskTarget(renderer, backButtonFont, item)),
+            ...bakeTarget(
+                renderer,
+                renderTitleMaskTarget(renderer, backButtonFont, item),
+                `${item.slug}/title-mask`,
+            ),
         });
 
         if (buildProjectDetailFooter(item).link) {
@@ -125,7 +144,7 @@ async function runBake() {
                     group: 'project',
                     slug: item.slug,
                     name: 'footer-link-mask',
-                    ...bakeTarget(renderer, footerLinkTarget),
+                    ...bakeTarget(renderer, footerLinkTarget, `${item.slug}/footer-link-mask`),
                 });
             }
         }
