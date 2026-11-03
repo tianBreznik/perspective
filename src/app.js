@@ -813,13 +813,18 @@ function openProjectDetail(index) {
     transitionBackFace('project');
     updateProjectFramePerformance();
     // Defer navigation/texture work off the click frame; hover prefetch often already warmed the iframe.
+    // Generation token drops stale rAFs when the user switches projects before the previous commit runs.
+    const commitGen = ++projectFrameCommitGen;
     requestAnimationFrame(() => {
+        if (commitGen !== projectFrameCommitGen) return;
+        if (activeProjectIndex !== index || projectFrameMode !== 'in') return;
         commitProjectFrameContent(item);
         ensureProjectDetailAssets(index, { applyTexture: true });
     });
 }
 
 function closeProjectDetail() {
+    projectFrameCommitGen++;
     projectFrameMode = 'out';
     transitionBackFace('projects');
 }
@@ -1827,7 +1832,7 @@ function updateHover() {
             if (entry && isProjectEntryInViewport(entry)) {
                 hoveringProjectIndex = hit.object.userData.projectIndex;
                 const item = projectIndexItems[hoveringProjectIndex];
-                if (item?.url) prefetchProjectUrl(item.url);
+                if (item?.url) prefetchProjectUrl(item.url, item);
                 prefetchProjectDetailAssets(hoveringProjectIndex);
             }
         }
@@ -1868,7 +1873,7 @@ function updateHover() {
                     && layout.y >= entryY - entry.descent && layout.y <= entryY + entry.ascent) {
                     hoveringProjectIndex = i;
                     const item = projectIndexItems[i];
-                    if (item?.url) prefetchProjectUrl(item.url);
+                    if (item?.url) prefetchProjectUrl(item.url, item);
                     prefetchProjectDetailAssets(i);
                     break;
                 }
@@ -2542,13 +2547,25 @@ const projectFrameContent = document.createElement('div');
 projectFrameContent.className = 'project-frame-content';
 const projectFrameIframe = document.createElement('iframe');
 projectFrameIframe.title = 'Project preview';
-projectFrameIframe.setAttribute('loading', 'lazy');
-projectFrameIframe.setAttribute('importance', 'low');
+projectFrameIframe.setAttribute('loading', 'eager');
 projectFrameContent.appendChild(projectFrameIframe);
 const projectFrameImg = document.createElement('img');
 projectFrameImg.alt = 'Project preview';
 projectFrameImg.style.display = 'none';
 projectFrameContent.appendChild(projectFrameImg);
+const projectFrameFallback = document.createElement('div');
+projectFrameFallback.className = 'project-frame-fallback';
+projectFrameFallback.hidden = true;
+const projectFrameFallbackTitle = document.createElement('p');
+projectFrameFallbackTitle.className = 'project-frame-fallback-title';
+const projectFrameFallbackLink = document.createElement('a');
+projectFrameFallbackLink.className = 'project-frame-fallback-link';
+projectFrameFallbackLink.target = '_blank';
+projectFrameFallbackLink.rel = 'noopener noreferrer';
+projectFrameFallbackLink.textContent = 'Open project';
+projectFrameFallback.appendChild(projectFrameFallbackTitle);
+projectFrameFallback.appendChild(projectFrameFallbackLink);
+projectFrameContent.appendChild(projectFrameFallback);
 projectFrameEl.appendChild(projectFrameContent);
 const projectFrameFreezeShield = document.createElement('div');
 projectFrameFreezeShield.className = 'project-frame-freeze-shield';
@@ -2556,6 +2573,7 @@ projectFrameFreezeShield.setAttribute('aria-hidden', 'true');
 projectFrameEl.appendChild(projectFrameFreezeShield);
 document.body.insertBefore(projectFrameEl, document.getElementById('canvas'));
 let projectFrameMode = null; // 'in' | 'out' | null
+let projectFrameCommitGen = 0;
 
 const cardPointerCapture = document.createElement('div');
 cardPointerCapture.id = 'card-pointer-capture';
@@ -2617,19 +2635,35 @@ function updateCardPointerCapture() {
 
 let prefetchedProjectUrl = null;
 
-function prefetchProjectUrl(url) {
+function projectCanEmbed(item) {
+    return !!(item?.url && !item.image && item.embed !== false);
+}
+
+function showProjectFrameFallback(item) {
+    projectFrameFallbackTitle.textContent = item?.title || 'Project';
+    projectFrameFallbackLink.href = item?.url || '#';
+    projectFrameFallback.hidden = false;
+}
+
+function hideProjectFrameFallback() {
+    projectFrameFallback.hidden = true;
+}
+
+function prefetchProjectUrl(url, item) {
     // Warm the real project iframe (while hidden) so opening a project doesn't start a second load.
-    if (!url || projectFrameMode === 'in') return;
+    // Skip while a project frame is open OR fading out — otherwise hover overwrites the visible site.
+    if (!url || projectFrameMode !== null) return;
+    if (item && !projectCanEmbed(item)) return;
     if (url === prefetchedProjectUrl || projectFrameIframe.getAttribute('src') === url) return;
     prefetchedProjectUrl = url;
-    loadedProjectFrameKey = url;
+    hideProjectFrameFallback();
     projectFrameIframe.style.display = 'block';
     projectFrameImg.style.display = 'none';
     projectFrameIframe.src = url;
 }
 
 function isProjectBackgroundActive() {
-    return projectFrameMode === 'in' && !!activeProjectItem?.url && !activeProjectItem?.image;
+    return projectFrameMode === 'in' && !!(activeProjectItem?.url || activeProjectItem?.image);
 }
 
 function pointerHitsCard(clientX, clientY) {
@@ -2664,6 +2698,8 @@ function setProjectFrameMediaSize(w, h) {
     projectFrameIframe.setAttribute('height', String(Math.round(h)));
     projectFrameImg.style.width = w + 'px';
     projectFrameImg.style.height = h + 'px';
+    projectFrameFallback.style.width = w + 'px';
+    projectFrameFallback.style.height = h + 'px';
 }
 
 function applyProjectFrameViewport() {
@@ -2697,6 +2733,7 @@ function projectFrameItemKey(item) {
 function commitProjectFrameContent(item) {
     const key = projectFrameItemKey(item);
     if (item.image) {
+        hideProjectFrameFallback();
         if (loadedProjectFrameKey === key) {
             projectFrameImg.style.display = 'block';
             projectFrameIframe.style.display = 'none';
@@ -2708,14 +2745,27 @@ function commitProjectFrameContent(item) {
         projectFrameIframe.style.display = 'none';
         return;
     }
-    if (loadedProjectFrameKey === key || projectFrameIframe.getAttribute('src') === item.url) {
+    if (!item.url) return;
+
+    // Sites that refuse framing (e.g. itch.io) get an explicit fallback instead of a blank iframe.
+    if (!projectCanEmbed(item)) {
         loadedProjectFrameKey = key;
-        projectFrameIframe.style.display = 'block';
+        prefetchedProjectUrl = null;
+        if (projectFrameIframe.getAttribute('src')) projectFrameIframe.removeAttribute('src');
+        projectFrameIframe.style.display = 'none';
         projectFrameImg.style.display = 'none';
+        showProjectFrameFallback(item);
         return;
     }
+
+    hideProjectFrameFallback();
+    const currentSrc = projectFrameIframe.getAttribute('src') || '';
+    // Always navigate when the src doesn't match this item — don't trust prefetch bookkeeping alone.
+    if (currentSrc !== item.url) {
+        projectFrameIframe.src = item.url;
+        prefetchedProjectUrl = item.url;
+    }
     loadedProjectFrameKey = key;
-    projectFrameIframe.src = item.url;
     projectFrameIframe.style.display = 'block';
     projectFrameImg.style.display = 'none';
 }

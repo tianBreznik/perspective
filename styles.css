@@ -477,6 +477,41 @@ dialog.section-dialog.popup-window[open] {
     background: #fff;
 }
 
+.project-frame-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    box-sizing: border-box;
+    padding: 2rem;
+    background: #f4f4f0;
+    color: #1a1a1a;
+    text-align: center;
+}
+
+.project-frame-fallback[hidden] {
+    display: none !important;
+}
+
+.project-frame-fallback-title {
+    margin: 0;
+    font-size: clamp(1.5rem, 4vw, 2.5rem);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.project-frame-fallback-link {
+    color: #1a1a1a;
+    font-size: 1rem;
+    letter-spacing: 0.04em;
+    text-underline-offset: 0.2em;
+}
+
+.project-frame-fallback-link:hover {
+    opacity: 0.7;
+}
+
 @media (max-width: 768px) {
     .section-dialog::backdrop {
         background: transparent;

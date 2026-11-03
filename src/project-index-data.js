@@ -38,6 +38,8 @@ export const PROJECT_INDEX_ITEMS = [
         collaborator: 'Fantamagico',
         description: 'A screen-based installation and AI chatbot: Luisa was born inside a screen. You cannot hug her, but you can write to her on Telegram, send images that briefly remake her world and dress, and receive selfies in return. Procedurally animated in Unity, she never repeats the same gesture. Built as a prompt-crafting experiment around ChatGPT jailbreaking, her traits draw from essays, scripts and novels on screen addiction. Through those limits, visitors are invited into a collective healing process — helping Luisa, and maybe themselves.',
         url: 'https://fantamagico.itch.io/luisa',
+        // itch.io game pages refuse framing (X-Frame-Options / CSP); open externally instead.
+        embed: false,
     },
     {
         slug: 'blink-a-link',
