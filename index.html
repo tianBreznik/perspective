@@ -12,10 +12,11 @@
     <link rel="apple-touch-icon" href="/icon-192.png">
     <!-- FAVICON_END -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Perspective Studio</title>
+    <!-- Title/description are for crawlers + search results only; page UI is unchanged. -->
+    <title>Tian Breznik — Perspective Studio</title>
     
     <!-- PWA Meta Tags -->
-    <meta name="description" content="Be interested globally">
+    <meta name="description" content="Tian Breznik — Perspective Studio. Computational artist and web developer based in London.">
     <meta name="author" content="Tian Breznik">
     <meta name="theme-color" content="#ffffff">
     <link rel="canonical" href="https://perspective.credit/">
@@ -53,6 +54,11 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <!-- Visually hidden: indexed by crawlers, not shown in the UI. -->
+    <main class="seo-content">
+        <h1>Tian Breznik</h1>
+        <p>I'm a computer science and maths graduate (nerd/developer) with a keen eye (cool/indie) and the right perspective (knowledge/esoteric). Currently at Goldsmiths, University of London.</p>
+    </main>
     <canvas id="canvas"></canvas>
     <button id="download-strip" type="button" title="Download wallet strip image">Download Wallet Strip</button>
     <button id="download-background" type="button" title="Download wallet background image">Download Wallet Background</button>

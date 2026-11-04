@@ -19,6 +19,16 @@ body:active {
     cursor: grabbing;
 }
 
+/* Off-screen for crawlers only — do not use display:none (often ignored). */
+.seo-content {
+    position: absolute;
+    left: -10000px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
+
 #canvas {
     display: block;
     width: 100%;
