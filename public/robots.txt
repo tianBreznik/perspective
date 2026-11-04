@@ -1,4 +1,7 @@
 User-agent: *
 Allow: /
+Disallow: /*.pdf$
+Disallow: /CV_Tian_2026.pdf
+Disallow: /CV_2026_5.pdf
 
-Sitemap: https://tianbreznik.github.io/perspective/sitemap.xml
+Sitemap: https://perspective.credit/sitemap.xml
