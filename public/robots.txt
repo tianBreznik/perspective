@@ -1,5 +1,8 @@
 User-agent: *
 Allow: /
+
+# CV PDFs — keep downloadable for people, invisible to crawlers
+Disallow: /downloads/
 Disallow: /*.pdf$
 Disallow: /CV_Tian_2026.pdf
 Disallow: /CV_2026_5.pdf
